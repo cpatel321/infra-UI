@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+
+{% block title %}Upload OSM File - OSM Processor{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0">Upload OSM File</h4>
+            </div>
+            <div class="card-body">
+                <form method="post" action="{% url 'osm_app:upload_file' %}" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="osm_file" class="form-label">Select .osm file</label>
+                        <input type="file" class="form-control" id="osm_file" name="osm_file" accept=".osm" required>
+                        <div class="form-text">Upload an OpenStreetMap (.osm) XML file to process</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 5px;">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        Upload File
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        {% if files %}
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0">Uploaded Files</h4>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>File Name</th>
+                                <th>Status</th>
+                                <th>Uploaded At</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for file in files %}
+                            <tr>
+                                <td>{{ file.file_name }}</td>
+                                <td>
+                                    <span class="status-badge status-{{ file.status }}">
+                                        {{ file.get_status_display }}
+                                    </span>
+                                </td>
+                                <td>{{ file.uploaded_at|date:"Y-m-d H:i" }}</td>
+                                <td>
+                                    {% if file.status == 'uploaded' %}
+                                        <a href="{% url 'osm_app:process_file' file.id %}" class="btn btn-sm btn-primary">Process</a>
+                                    {% elif file.status == 'processed' %}
+                                        <a href="{% url 'osm_app:crop_file' file.id %}" class="btn btn-sm btn-info text-white">Crop</a>
+                                        <a href="{% url 'osm_app:download_file' file.id %}" class="btn btn-sm btn-success">Download</a>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-body">
+                <h5>How to use:</h5>
+                <ol>
+                    <li><strong>Upload</strong> an .osm file using the form above</li>
+                    <li><strong>Process</strong> the file to extract only roads</li>
+                    <li><strong>Crop</strong> the map to your desired area using the interactive map</li>
+                    <li><strong>Download</strong> the processed .osm file</li>
+                </ol>
+                <p class="mb-0"><small class="text-muted">You can get OSM files from <a href="https://www.openstreetmap.org/export" target="_blank">OpenStreetMap Export</a></small></p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

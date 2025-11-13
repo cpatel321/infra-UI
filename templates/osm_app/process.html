@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+
+{% block title %}Process File - OSM Processor{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0">Process OSM File</h4>
+            </div>
+            <div class="card-body">
+                <h5>{{ osm_file.file_name }}</h5>
+                <p class="text-muted">Status: <span class="status-badge status-{{ osm_file.status }}">{{ osm_file.get_status_display }}</span></p>
+                
+                <div class="alert alert-info">
+                    <strong>Processing will:</strong>
+                    <ul class="mb-0">
+                        <li>Extract only roads from the OSM file</li>
+                        <li>Remove all other map features (buildings, amenities, etc.)</li>
+                        <li>Keep only nodes that are part of road networks</li>
+                    </ul>
+                </div>
+
+                <form method="post">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-primary btn-lg">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 5px;">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        Start Processing
+                    </button>
+                    <a href="{% url 'osm_app:index' %}" class="btn btn-secondary btn-lg">Cancel</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

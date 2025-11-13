@@ -1,0 +1,4 @@
+Django>=4.2,<5.0
+osmium>=3.6.0
+lxml>=4.9.0
+Pillow>=10.0.0

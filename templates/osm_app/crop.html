@@ -1,0 +1,272 @@
+{% extends 'base.html' %}
+
+{% block title %}Crop Map - OSM Processor{% endblock %}
+
+{% block extra_css %}
+<style>
+    .leaflet-draw-toolbar {
+        display: none;
+    }
+    .controls-panel {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 1000;
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        max-width: 300px;
+    }
+    .info-panel {
+        margin-top: 10px;
+        padding: 10px;
+        background: #f8f9fa;
+        border-radius: 5px;
+        font-size: 0.9em;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0">Crop Map Area</h4>
+            </div>
+            <div class="card-body">
+                <p>{{ osm_file.file_name }}</p>
+                <div class="alert alert-info">
+                    <strong>Instructions:</strong> Draw a rectangle on the map to select the area you want to keep. 
+                    Click "Apply Crop" to trim the OSM file to the selected area.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div style="position: relative;">
+            <div id="map"></div>
+            
+            <div class="controls-panel">
+                <h6>Crop Controls</h6>
+                <button id="drawBtn" class="btn btn-primary btn-sm w-100 mb-2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle;">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    </svg>
+                    Draw Selection Rectangle
+                </button>
+                <button id="clearBtn" class="btn btn-warning btn-sm w-100 mb-2" style="display:none;">
+                    Clear Selection
+                </button>
+                <button id="applyCropBtn" class="btn btn-success btn-sm w-100 mb-2" style="display:none;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle;">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    Apply Crop
+                </button>
+                <a href="{% url 'osm_app:download_file' osm_file.id %}" class="btn btn-info btn-sm w-100 text-white">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle;">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Download Current File
+                </a>
+                
+                <div id="boundsInfo" class="info-panel" style="display:none;">
+                    <strong>Selected Bounds:</strong><br>
+                    <small>
+                        North: <span id="maxLat">-</span><br>
+                        South: <span id="minLat">-</span><br>
+                        East: <span id="maxLon">-</span><br>
+                        West: <span id="minLon">-</span>
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-12">
+        <a href="{% url 'osm_app:index' %}" class="btn btn-secondary">Back to Home</a>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let map;
+    let roadsLayer;
+    let selectionRectangle = null;
+    let isDrawing = false;
+    let startLatLng = null;
+    
+    // Initialize map
+    const bounds = {{ bounds|safe }};
+    const centerLat = (bounds.min_lat + bounds.max_lat) / 2;
+    const centerLon = (bounds.min_lon + bounds.max_lon) / 2;
+    
+    map = L.map('map').setView([centerLat, centerLon], 13);
+    
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+    
+    // Load and display OSM data
+    fetch("{% url 'osm_app:get_osm_data' osm_file.id %}")
+        .then(response => response.json())
+        .then(data => {
+            if (data.geojson) {
+                roadsLayer = L.geoJSON(data.geojson, {
+                    style: function(feature) {
+                        return {
+                            color: '#3388ff',
+                            weight: 3,
+                            opacity: 0.7
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        if (feature.properties) {
+                            let popupContent = '<strong>Road Information</strong><br>';
+                            if (feature.properties.name) {
+                                popupContent += 'Name: ' + feature.properties.name + '<br>';
+                            }
+                            if (feature.properties.highway) {
+                                popupContent += 'Type: ' + feature.properties.highway + '<br>';
+                            }
+                            layer.bindPopup(popupContent);
+                        }
+                    }
+                }).addTo(map);
+                
+                // Fit map to roads
+                if (data.bounds) {
+                    map.fitBounds([
+                        [data.bounds.min_lat, data.bounds.min_lon],
+                        [data.bounds.max_lat, data.bounds.max_lon]
+                    ]);
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error loading OSM data:', error);
+            alert('Error loading map data');
+        });
+    
+    // Drawing functionality
+    document.getElementById('drawBtn').addEventListener('click', function() {
+        isDrawing = true;
+        map.dragging.disable();
+        document.getElementById('map').style.cursor = 'crosshair';
+        this.disabled = true;
+        this.textContent = 'Click and drag on map...';
+    });
+    
+    map.on('mousedown', function(e) {
+        if (isDrawing) {
+            startLatLng = e.latlng;
+            
+            if (selectionRectangle) {
+                map.removeLayer(selectionRectangle);
+            }
+            
+            selectionRectangle = L.rectangle([startLatLng, startLatLng], {
+                color: '#ff7800',
+                weight: 2,
+                fillOpacity: 0.2
+            }).addTo(map);
+        }
+    });
+    
+    map.on('mousemove', function(e) {
+        if (isDrawing && startLatLng && selectionRectangle) {
+            selectionRectangle.setBounds([startLatLng, e.latlng]);
+        }
+    });
+    
+    map.on('mouseup', function(e) {
+        if (isDrawing && startLatLng) {
+            isDrawing = false;
+            map.dragging.enable();
+            document.getElementById('map').style.cursor = '';
+            
+            const bounds = selectionRectangle.getBounds();
+            updateBoundsDisplay(bounds);
+            
+            document.getElementById('drawBtn').disabled = false;
+            document.getElementById('drawBtn').innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg> Draw Selection Rectangle';
+            document.getElementById('clearBtn').style.display = 'block';
+            document.getElementById('applyCropBtn').style.display = 'block';
+            document.getElementById('boundsInfo').style.display = 'block';
+        }
+    });
+    
+    document.getElementById('clearBtn').addEventListener('click', function() {
+        if (selectionRectangle) {
+            map.removeLayer(selectionRectangle);
+            selectionRectangle = null;
+        }
+        this.style.display = 'none';
+        document.getElementById('applyCropBtn').style.display = 'none';
+        document.getElementById('boundsInfo').style.display = 'none';
+    });
+    
+    document.getElementById('applyCropBtn').addEventListener('click', function() {
+        if (!selectionRectangle) {
+            alert('Please draw a selection rectangle first');
+            return;
+        }
+        
+        const bounds = selectionRectangle.getBounds();
+        const cropData = {
+            min_lat: bounds.getSouth(),
+            max_lat: bounds.getNorth(),
+            min_lon: bounds.getWest(),
+            max_lon: bounds.getEast()
+        };
+        
+        if (confirm('Apply crop to this area? This will trim the OSM file.')) {
+            this.disabled = true;
+            this.textContent = 'Processing...';
+            
+            fetch("{% url 'osm_app:crop_file' osm_file.id %}", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify(cropData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Crop applied successfully!');
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.error);
+                    this.disabled = false;
+                    this.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle;"><polyline points="20 6 9 17 4 12"></polyline></svg> Apply Crop';
+                }
+            })
+            .catch(error => {
+                alert('Error applying crop: ' + error);
+                this.disabled = false;
+                this.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle;"><polyline points="20 6 9 17 4 12"></polyline></svg> Apply Crop';
+            });
+        }
+    });
+    
+    function updateBoundsDisplay(bounds) {
+        document.getElementById('minLat').textContent = bounds.getSouth().toFixed(6);
+        document.getElementById('maxLat').textContent = bounds.getNorth().toFixed(6);
+        document.getElementById('minLon').textContent = bounds.getWest().toFixed(6);
+        document.getElementById('maxLon').textContent = bounds.getEast().toFixed(6);
+    }
+</script>
+{% endblock %}

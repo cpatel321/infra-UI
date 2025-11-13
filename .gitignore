@@ -1,0 +1,5 @@
+venv/
+*.pyc
+*.osm
+*.bat
+*.md
