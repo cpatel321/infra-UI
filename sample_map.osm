@@ -1,0 +1,63 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<osm version="0.6" generator="Manual">
+  <bounds minlat="40.7000" maxlat="40.7100" minlon="-74.0100" maxlon="-74.0000"/>
+  
+  <!-- Sample nodes for a simple road network -->
+  <node id="1" lat="40.7010" lon="-74.0090" version="1"/>
+  <node id="2" lat="40.7020" lon="-74.0080" version="1"/>
+  <node id="3" lat="40.7030" lon="-74.0070" version="1"/>
+  <node id="4" lat="40.7040" lon="-74.0060" version="1"/>
+  <node id="5" lat="40.7050" lon="-74.0050" version="1"/>
+  <node id="6" lat="40.7010" lon="-74.0070" version="1"/>
+  <node id="7" lat="40.7030" lon="-74.0050" version="1"/>
+  <node id="8" lat="40.7050" lon="-74.0030" version="1"/>
+  
+  <!-- Sample building (should be removed during processing) -->
+  <node id="100" lat="40.7025" lon="-74.0075" version="1"/>
+  <node id="101" lat="40.7025" lon="-74.0065" version="1"/>
+  <node id="102" lat="40.7035" lon="-74.0065" version="1"/>
+  <node id="103" lat="40.7035" lon="-74.0075" version="1"/>
+  
+  <!-- Main Street (primary road) -->
+  <way id="1" version="1">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="5"/>
+    <tag k="highway" v="primary"/>
+    <tag k="name" v="Main Street"/>
+    <tag k="lanes" v="2"/>
+  </way>
+  
+  <!-- Cross Street (secondary road) -->
+  <way id="2" version="1">
+    <nd ref="6"/>
+    <nd ref="3"/>
+    <nd ref="7"/>
+    <tag k="highway" v="secondary"/>
+    <tag k="name" v="Cross Street"/>
+    <tag k="lanes" v="2"/>
+  </way>
+  
+  <!-- Side Street (residential) -->
+  <way id="3" version="1">
+    <nd ref="7"/>
+    <nd ref="8"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Side Street"/>
+    <tag k="lanes" v="1"/>
+  </way>
+  
+  <!-- Building (should be removed) -->
+  <way id="100" version="1">
+    <nd ref="100"/>
+    <nd ref="101"/>
+    <nd ref="102"/>
+    <nd ref="103"/>
+    <nd ref="100"/>
+    <tag k="building" v="yes"/>
+    <tag k="name" v="Sample Building"/>
+  </way>
+  
+</osm>
