@@ -382,18 +382,44 @@ class OSMRoutePartitioner:
         return geojson_data
         
     def get_statistics(self):
-        """Get road network statistics."""
+        """Get road network statistics based on original OSM data (not augmented graph)."""
+        # Count nodes that are in the connected component
         if self.G is None:
             return {}
         
-        total_length = sum(data['length'] for u, v, data in self.G.edges(data=True))
+        # Get nodes in the connected component
+        component_nodes = set(self.G.nodes())
+        
+        # Filter ways to only include those with all nodes in component
+        component_ways = []
+        for way in self.ways:
+            way_nodes = [nid for nid in way if nid in component_nodes]
+            if len(way_nodes) >= 2:
+                component_ways.append(way_nodes)
+        
+        # Calculate total length by summing all way segments
+        total_length = 0.0
+        for way in component_ways:
+            for u, v in zip(way[:-1], way[1:]):
+                if u in self.nodes and v in self.nodes:
+                    lat1, lon1 = self.nodes[u]
+                    lat2, lon2 = self.nodes[v]
+                    total_length += haversine_m(lon1, lat1, lon2, lat2)
+        
+        # Count unique nodes actually used in ways
+        used_nodes = set()
+        for way in component_ways:
+            used_nodes.update(way)
+        
+        total_ways = len(component_ways)
+        total_nodes = len(used_nodes)
         
         return {
-            'total_nodes': self.G.number_of_nodes(),
-            'total_roads': self.G.number_of_edges(),
+            'total_nodes': total_nodes,
+            'total_roads': total_ways,
             'total_length_m': round(total_length, 2),
             'total_length_km': round(total_length / 1000, 2),
-            'avg_road_length_m': round(total_length / self.G.number_of_edges(), 2) if self.G.number_of_edges() > 0 else 0,
+            'avg_road_length_m': round(total_length / total_ways, 2) if total_ways > 0 else 0,
             'depot_node': self.depot,
             'centroid': self.centroid
         }
