@@ -180,11 +180,41 @@
     <div class="col-lg-3">
         <!-- Controls Panel -->
         <div class="controls-panel">
-            <h6>🚗 Route Configuration</h6>
+            <h6>🚗 Vehicle Parameters</h6>
+            
+            <!-- Vehicle Speed -->
             <div class="mb-3">
-                <label for="numVehicles" class="form-label">Number of Vehicles (k):</label>
-                <input type="number" class="form-control" id="numVehicles" value="3" min="1" max="10">
-                <small class="text-muted">Enter number of vehicles for route optimization</small>
+                <label for="vehicleSpeed" class="form-label">Vehicle Speed (km/h):</label>
+                <input type="number" class="form-control" id="vehicleSpeed" value="25" min="5" max="80" step="5">
+                <small class="text-muted">Average collection speed</small>
+            </div>
+            
+            <!-- Time Window -->
+            <div class="mb-3">
+                <label for="timeWindow" class="form-label">Time Window (hours):</label>
+                <input type="number" class="form-control" id="timeWindow" value="4" min="1" max="12" step="0.5">
+                <small class="text-muted">Max operation time per vehicle</small>
+            </div>
+            
+            <!-- Suggested Vehicles Display -->
+            <div class="alert alert-info" id="suggestedVehicles" style="display: none;">
+                <strong>💡 Suggested:</strong><br>
+                <span id="suggestedCount"></span> vehicles needed<br>
+                <small id="suggestedDetails"></small>
+            </div>
+            
+            <hr>
+            
+            <!-- Manual Override -->
+            <div class="mb-3">
+                <label for="numVehicles" class="form-label">Number of Vehicles:</label>
+                <div class="input-group">
+                    <input type="number" class="form-control" id="numVehicles" value="3" min="1" max="20">
+                    <button class="btn btn-outline-secondary" type="button" id="useSuggested" style="display: none;">
+                        Use Suggested
+                    </button>
+                </div>
+                <small class="text-muted">Manual override or use suggestion</small>
             </div>
             
             <button id="computeBtn" class="btn btn-primary w-100 mb-2">
@@ -310,12 +340,54 @@
         })
         .catch(error => console.error('Error loading roads:', error));
     
+    // Calculate suggested vehicles based on parameters
+    function calculateSuggestedVehicles() {
+        const totalLengthKm = {{ stats.total_length_km|default:"0" }};
+        const vehicleSpeed = parseFloat(document.getElementById('vehicleSpeed').value);
+        const timeWindow = parseFloat(document.getElementById('timeWindow').value);
+        
+        if (totalLengthKm > 0 && vehicleSpeed > 0 && timeWindow > 0) {
+            // Calculate total time needed to cover all roads
+            const totalTimeHours = totalLengthKm / vehicleSpeed;
+            
+            // Calculate number of vehicles needed
+            const suggestedVehicles = Math.ceil(totalTimeHours / timeWindow);
+            
+            // Display suggestion
+            document.getElementById('suggestedCount').textContent = suggestedVehicles;
+            document.getElementById('suggestedDetails').textContent = 
+                `Total distance: ${totalLengthKm.toFixed(2)} km | ` +
+                `Time needed: ${totalTimeHours.toFixed(2)} hrs | ` +
+                `Per vehicle: ${timeWindow} hrs`;
+            document.getElementById('suggestedVehicles').style.display = 'block';
+            document.getElementById('useSuggested').style.display = 'inline-block';
+            
+            return suggestedVehicles;
+        }
+        return 3; // default
+    }
+    
+    // Event listeners for parameter changes
+    document.getElementById('vehicleSpeed').addEventListener('input', calculateSuggestedVehicles);
+    document.getElementById('timeWindow').addEventListener('input', calculateSuggestedVehicles);
+    
+    // Use suggested button
+    document.getElementById('useSuggested').addEventListener('click', function() {
+        const suggested = calculateSuggestedVehicles();
+        document.getElementById('numVehicles').value = suggested;
+    });
+    
+    // Initial calculation
+    if ({{ stats.total_length_km|default:"0" }} > 0) {
+        calculateSuggestedVehicles();
+    }
+    
     // Compute routes button
     document.getElementById('computeBtn').addEventListener('click', function() {
         const k = parseInt(document.getElementById('numVehicles').value);
         
-        if (k < 1 || k > 10) {
-            alert('Please enter a number between 1 and 10');
+        if (k < 1 || k > 20) {
+            alert('Please enter a number between 1 and 20');
             return;
         }
         
