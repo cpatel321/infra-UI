@@ -1,0 +1,464 @@
+{% extends 'base.html' %}
+
+{% block title %}Route Planning - OSM Processor{% endblock %}
+
+{% block extra_css %}
+<style>
+    .stats-panel {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 15px;
+    }
+    .stats-panel h6 {
+        color: #667eea;
+        margin-bottom: 10px;
+        font-weight: 600;
+    }
+    .stat-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 5px 0;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    .stat-item:last-child {
+        border-bottom: none;
+    }
+    .stat-label {
+        color: #666;
+        font-size: 0.9em;
+    }
+    .stat-value {
+        color: #333;
+        font-weight: 600;
+        font-size: 0.9em;
+    }
+    .controls-panel {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 15px;
+    }
+    .controls-panel h6 {
+        color: #667eea;
+        margin-bottom: 10px;
+        font-weight: 600;
+    }
+    .vehicle-colors {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 10px;
+    }
+    .color-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+    .color-box {
+        width: 20px;
+        height: 20px;
+        border-radius: 3px;
+        border: 1px solid #ddd;
+    }
+    #map {
+        height: 600px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .loading {
+        text-align: center;
+        padding: 20px;
+        color: #667eea;
+    }
+    .spinner {
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #667eea;
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        animation: spin 1s linear infinite;
+        margin: 10px auto;
+    }
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    .route-legend {
+        background: white;
+        padding: 10px;
+        border-radius: 5px;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+    .route-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 5px;
+        padding: 5px;
+        border-radius: 3px;
+    }
+    .route-checkbox:hover {
+        background: #f5f5f5;
+    }
+    .route-checkbox label {
+        margin: 0;
+        cursor: pointer;
+        font-size: 0.9em;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">Route Planning: {{ osm_file.file_name }}</h4>
+                <a href="{% url 'osm_app:crop_file' osm_file.id %}" class="btn btn-sm btn-secondary">
+                    ← Back to Crop
+                </a>
+            </div>
+            <div class="card-body">
+                <!-- Statistics Panel -->
+                <div class="stats-panel">
+                    <h6>📊 Road Network Statistics</h6>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Roads:</span>
+                        <span class="stat-value" id="totalRoads">{{ stats.total_roads|default:"Calculating..." }}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Nodes:</span>
+                        <span class="stat-value" id="totalNodes">{{ stats.total_nodes|default:"Calculating..." }}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Length:</span>
+                        <span class="stat-value" id="totalLength">{{ stats.total_length_km|default:"0" }} km ({{ stats.total_length_m|default:"0" }} m)</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Average Road Length:</span>
+                        <span class="stat-value" id="avgLength">{{ stats.avg_road_length_m|default:"0" }} m</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Depot Location (Centroid):</span>
+                        <span class="stat-value" id="depotLocation">
+                            {% if stats.centroid %}
+                                {{ stats.centroid.0|floatformat:6 }}, {{ stats.centroid.1|floatformat:6 }}
+                            {% else %}
+                                Will be calculated
+                            {% endif %}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-9">
+        <div class="card">
+            <div class="card-body p-0">
+                <div id="map"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-3">
+        <!-- Controls Panel -->
+        <div class="controls-panel">
+            <h6>🚗 Route Configuration</h6>
+            <div class="mb-3">
+                <label for="numVehicles" class="form-label">Number of Vehicles (k):</label>
+                <input type="number" class="form-control" id="numVehicles" value="3" min="1" max="10">
+                <small class="text-muted">Enter number of vehicles for route optimization</small>
+            </div>
+            
+            <button id="computeBtn" class="btn btn-primary w-100 mb-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle;">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+                Compute Routes
+            </button>
+            
+            <div id="loadingIndicator" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Computing optimal routes...</p>
+            </div>
+            
+            <div id="routeInfo" style="display: none;">
+                <hr>
+                <p class="text-success">✓ Routes computed successfully!</p>
+                <p class="text-muted" style="font-size: 0.85em;">Starting/Ending point: Map centroid</p>
+            </div>
+        </div>
+        
+        <!-- Route Toggle Panel -->
+        <div class="controls-panel" id="routeToggles" style="display: none;">
+            <h6>🗺️ Route Visibility</h6>
+            <div class="route-legend" id="routeLegend">
+                <!-- Checkboxes will be added dynamically -->
+            </div>
+        </div>
+        
+        <!-- Vehicle Colors Legend -->
+        <div class="controls-panel">
+            <h6>🎨 Vehicle Colors</h6>
+            <div class="vehicle-colors" id="colorLegend">
+                <!-- Will be populated after route computation -->
+                <small class="text-muted">Colors will be assigned after route computation</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-12">
+        <a href="{% url 'osm_app:index' %}" class="btn btn-secondary">Back to Home</a>
+        <a href="{% url 'osm_app:download_file' osm_file.id %}" class="btn btn-info">Download OSM File</a>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/leaflet-polyline-decorator@1.7.0/dist/leaflet.polylineDecorator.min.js"></script>
+<script>
+    let map;
+    let roadsLayer;
+    let routeLayers = [];
+    let routeData = null;
+    
+    // Vehicle colors
+    const vehicleColors = [
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+        '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B500', '#52B788'
+    ];
+    
+    // Initialize map
+    const bounds = {{ bounds|safe }};
+    const centerLat = (bounds.min_lat + bounds.max_lat) / 2;
+    const centerLon = (bounds.min_lon + bounds.max_lon) / 2;
+    
+    map = L.map('map').setView([centerLat, centerLon], 13);
+    
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+    
+    // Load and display OSM roads
+    fetch("{% url 'osm_app:get_osm_data' osm_file.id %}")
+        .then(response => response.json())
+        .then(data => {
+            if (data.geojson) {
+                roadsLayer = L.geoJSON(data.geojson, {
+                    style: function(feature) {
+                        return {
+                            color: '#CCCCCC',
+                            weight: 2,
+                            opacity: 0.5
+                        };
+                    }
+                }).addTo(map);
+                
+                if (data.bounds) {
+                    map.fitBounds([
+                        [data.bounds.min_lat, data.bounds.min_lon],
+                        [data.bounds.max_lat, data.bounds.max_lon]
+                    ]);
+                }
+            }
+        })
+        .catch(error => console.error('Error loading roads:', error));
+    
+    // Compute routes button
+    document.getElementById('computeBtn').addEventListener('click', function() {
+        const k = parseInt(document.getElementById('numVehicles').value);
+        
+        if (k < 1 || k > 10) {
+            alert('Please enter a number between 1 and 10');
+            return;
+        }
+        
+        // Show loading
+        document.getElementById('loadingIndicator').style.display = 'block';
+        document.getElementById('routeInfo').style.display = 'none';
+        this.disabled = true;
+        
+        // Call API
+        fetch("{% url 'osm_app:compute_routes' osm_file.id %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({ k: k })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('loadingIndicator').style.display = 'none';
+            document.getElementById('computeBtn').disabled = false;
+            
+            if (data.success) {
+                routeData = data.routes;
+                displayRoutes(data.routes);
+                updateStatistics(data.stats);
+                document.getElementById('routeInfo').style.display = 'block';
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => {
+            document.getElementById('loadingIndicator').style.display = 'none';
+            document.getElementById('computeBtn').disabled = false;
+            alert('Error computing routes: ' + error);
+        });
+    });
+    
+    function displayRoutes(routesGeoJSON) {
+        // Clear existing routes
+        routeLayers.forEach(layer => map.removeLayer(layer));
+        routeLayers = [];
+        
+        // Add new routes
+        routesGeoJSON.features.forEach((feature, index) => {
+            const vehicleId = feature.properties.vehicle_id;
+            const color = vehicleColors[(vehicleId - 1) % vehicleColors.length];
+            
+            // Create animated polyline for route
+            // Note: Using simple animated polyline instead of antPath for better compatibility
+            const routeLine = L.polyline(feature.geometry.coordinates.map(c => [c[1], c[0]]), {
+                color: color,
+                weight: 4,
+                opacity: 0.8,
+                smoothFactor: 1
+            }).addTo(map);
+            
+            // Add decorator for animated arrows
+            try {
+                const decorator = L.polylineDecorator(routeLine, {
+                    patterns: [
+                        {
+                            offset: '0%',
+                            repeat: 50,
+                            symbol: L.Symbol.arrowHead({
+                                pixelSize: 8,
+                                polygon: false,
+                                pathOptions: {
+                                    color: color,
+                                    fillOpacity: 1,
+                                    weight: 2,
+                                    opacity: 0.8
+                                }
+                            })
+                        }
+                    ]
+                }).addTo(map);
+                
+                routeLayers.push({ layer: routeLine, decorator: decorator, vehicleId: vehicleId, color: color });
+            } catch (e) {
+                console.warn('Decorator not available, using plain polyline:', e);
+                routeLayers.push({ layer: routeLine, vehicleId: vehicleId, color: color });
+            }
+            
+            // Popup with info
+            routeLine.bindPopup(`
+                <strong>Vehicle ${vehicleId}</strong><br>
+                Length: ${feature.properties.length_m.toLocaleString()} m<br>
+                Nodes: ${feature.properties.num_nodes}
+            `);
+        });
+        
+        // Create route toggles
+        createRouteToggles();
+        
+        // Update color legend
+        updateColorLegend();
+    }
+    
+    function createRouteToggles() {
+        const legendDiv = document.getElementById('routeLegend');
+        legendDiv.innerHTML = '';
+        
+        routeLayers.forEach(({ layer, decorator, vehicleId, color }) => {
+            const checkDiv = document.createElement('div');
+            checkDiv.className = 'route-checkbox';
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `route-${vehicleId}`;
+            checkbox.checked = true;
+            checkbox.addEventListener('change', function() {
+                if (this.checked) {
+                    map.addLayer(layer);
+                    if (decorator) map.addLayer(decorator);
+                } else {
+                    map.removeLayer(layer);
+                    if (decorator) map.removeLayer(decorator);
+                }
+            });
+            
+            const colorBox = document.createElement('div');
+            colorBox.className = 'color-box';
+            colorBox.style.backgroundColor = color;
+            
+            const label = document.createElement('label');
+            label.htmlFor = `route-${vehicleId}`;
+            label.textContent = `Vehicle ${vehicleId}`;
+            
+            checkDiv.appendChild(checkbox);
+            checkDiv.appendChild(colorBox);
+            checkDiv.appendChild(label);
+            legendDiv.appendChild(checkDiv);
+        });
+        
+        document.getElementById('routeToggles').style.display = 'block';
+    }
+    
+    function updateColorLegend() {
+        const legendDiv = document.getElementById('colorLegend');
+        legendDiv.innerHTML = '';
+        
+        routeLayers.forEach(({ vehicleId, color }) => {
+            const item = document.createElement('div');
+            item.className = 'color-item';
+            
+            const box = document.createElement('div');
+            box.className = 'color-box';
+            box.style.backgroundColor = color;
+            
+            const label = document.createElement('span');
+            label.textContent = `V${vehicleId}`;
+            label.style.fontSize = '0.85em';
+            
+            item.appendChild(box);
+            item.appendChild(label);
+            legendDiv.appendChild(item);
+        });
+    }
+    
+    function updateStatistics(stats) {
+        if (stats.total_roads) {
+            document.getElementById('totalRoads').textContent = stats.total_roads.toLocaleString();
+        }
+        if (stats.total_nodes) {
+            document.getElementById('totalNodes').textContent = stats.total_nodes.toLocaleString();
+        }
+        if (stats.total_length_km) {
+            document.getElementById('totalLength').textContent = 
+                `${stats.total_length_km.toLocaleString()} km (${stats.total_length_m.toLocaleString()} m)`;
+        }
+        if (stats.avg_road_length_m) {
+            document.getElementById('avgLength').textContent = 
+                `${stats.avg_road_length_m.toLocaleString()} m`;
+        }
+        if (stats.centroid) {
+            document.getElementById('depotLocation').textContent = 
+                `${stats.centroid[0].toFixed(6)}, ${stats.centroid[1].toFixed(6)}`;
+        }
+    }
+</script>
+{% endblock %}

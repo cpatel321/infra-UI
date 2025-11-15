@@ -6,6 +6,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.core.files.base import ContentFile
 from .models import OSMFile
 from .osm_utils import OSMProcessor
+from .routing_utils import OSMRoutePartitioner
 import os
 import json
 
@@ -195,3 +196,72 @@ def download_file(request, file_id):
     except Exception as e:
         messages.error(request, f'Error downloading file: {str(e)}')
         return redirect('osm_app:index')
+
+
+def route_planning(request, file_id):
+    """Display route planning page with map and vehicle input"""
+    osm_record = get_object_or_404(OSMFile, id=file_id)
+    
+    if not osm_record.processed_file:
+        messages.error(request, 'No processed file available for route planning')
+        return redirect('osm_app:index')
+    
+    # Calculate bounds
+    bounds = {
+        'min_lat': osm_record.min_lat,
+        'max_lat': osm_record.max_lat,
+        'min_lon': osm_record.min_lon,
+        'max_lon': osm_record.max_lon
+    }
+    
+    # Get statistics
+    try:
+        partitioner = OSMRoutePartitioner(osm_record.processed_file.path)
+        partitioner.parse_osm()
+        partitioner.build_graph()
+        partitioner.find_centroid_depot()
+        partitioner.get_connected_component()
+        stats = partitioner.get_statistics()
+    except Exception as e:
+        stats = {}
+        print(f"Error getting statistics: {e}")
+    
+    return render(request, 'osm_app/route_planning.html', {
+        'osm_file': osm_record,
+        'bounds': bounds,
+        'stats': stats
+    })
+
+
+def compute_routes(request, file_id):
+    """Compute optimal routes for k vehicles"""
+    osm_record = get_object_or_404(OSMFile, id=file_id)
+    
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            k = int(data.get('k', 1))
+            
+            if k < 1:
+                return JsonResponse({'success': False, 'error': 'Number of vehicles must be at least 1'})
+            
+            # Run routing algorithm
+            partitioner = OSMRoutePartitioner(osm_record.processed_file.path)
+            routes_geojson = partitioner.compute_routes(k)
+            
+            # Get statistics
+            stats = partitioner.get_statistics()
+            
+            return JsonResponse({
+                'success': True,
+                'routes': routes_geojson,
+                'stats': stats
+            })
+            
+        except Exception as e:
+            print(f"Error computing routes: {e}")
+            import traceback
+            traceback.print_exc()
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})

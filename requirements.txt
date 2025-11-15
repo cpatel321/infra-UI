@@ -2,3 +2,6 @@ Django>=4.2,<5.0
 osmium>=3.6.0
 lxml>=4.9.0
 Pillow>=10.0.0
+networkx>=3.0
+numpy>=1.24.0
+shapely>=2.0.0

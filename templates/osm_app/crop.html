@@ -68,13 +68,23 @@
                     </svg>
                     Apply Crop
                 </button>
-                <a href="{% url 'osm_app:download_file' osm_file.id %}" class="btn btn-info btn-sm w-100 text-white">
+                <a href="{% url 'osm_app:download_file' osm_file.id %}" class="btn btn-info btn-sm w-100 mb-2 text-white">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle;">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="7 10 12 15 17 10"></polyline>
                         <line x1="12" y1="15" x2="12" y2="3"></line>
                     </svg>
                     Download Current File
+                </a>
+                
+                <hr style="border-color: #ccc; margin: 15px 0;">
+                
+                <a href="{% url 'osm_app:route_planning' osm_file.id %}" class="btn btn-success btn-sm w-100 mb-2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle;">
+                        <polyline points="9 11 12 14 22 4"></polyline>
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                    </svg>
+                    Next: Route Planning →
                 </a>
                 
                 <div id="boundsInfo" class="info-panel" style="display:none;">
