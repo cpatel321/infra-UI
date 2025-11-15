@@ -244,9 +244,10 @@
     
     map = L.map('map').setView([centerLat, centerLon], 13);
     
-    // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
+    // Add Esri World Imagery (Satellite) tiles
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Esri World Imagery',
+        maxZoom: 18
     }).addTo(map);
     
     // Load and display OSM roads
