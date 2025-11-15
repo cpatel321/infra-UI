@@ -109,6 +109,16 @@
         cursor: pointer;
         font-size: 0.9em;
     }
+    .centroid-marker {
+        background-color: #FF4444;
+        border: 3px solid white;
+        border-radius: 50%;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .centroid-popup {
+        font-weight: 600;
+        text-align: center;
+    }
 </style>
 {% endblock %}
 
@@ -230,12 +240,22 @@
     let roadsLayer;
     let routeLayers = [];
     let routeData = null;
+    let centroidMarker = null;
     
     // Vehicle colors
     const vehicleColors = [
         '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
         '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B500', '#52B788'
     ];
+    
+    // Centroid data from server
+    {% if stats.centroid %}
+    const centroidLat = {{ stats.centroid.0 }};
+    const centroidLon = {{ stats.centroid.1 }};
+    {% else %}
+    const centroidLat = null;
+    const centroidLon = null;
+    {% endif %}
     
     // Initialize map
     const bounds = {{ bounds|safe }};
@@ -249,6 +269,21 @@
         attribution: 'Esri World Imagery',
         maxZoom: 18
     }).addTo(map);
+    
+    // Add centroid marker if available
+    if (centroidLat && centroidLon) {
+        const redIcon = L.divIcon({
+            className: 'centroid-marker',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
+            popupAnchor: [0, -8],
+            html: '<div style="width:100%;height:100%;background:#FF4444;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.5);"></div>'
+        });
+        
+        centroidMarker = L.marker([centroidLat, centroidLon], { icon: redIcon })
+            .bindPopup('<div class="centroid-popup"><strong>🎯 Depot (Centroid)</strong><br>Start/End Point for All Vehicles</div>')
+            .addTo(map);
+    }
     
     // Load and display OSM roads
     fetch("{% url 'osm_app:get_osm_data' osm_file.id %}")
@@ -321,56 +356,87 @@
     
     function displayRoutes(routesGeoJSON) {
         // Clear existing routes
-        routeLayers.forEach(layer => map.removeLayer(layer));
+        routeLayers.forEach(({ layer, decorator, animatedLine, animationInterval }) => {
+            if (layer) map.removeLayer(layer);
+            if (decorator) map.removeLayer(decorator);
+            if (animatedLine) map.removeLayer(animatedLine);
+            if (animationInterval) clearInterval(animationInterval);
+        });
         routeLayers = [];
         
         // Add new routes
         routesGeoJSON.features.forEach((feature, index) => {
             const vehicleId = feature.properties.vehicle_id;
             const color = vehicleColors[(vehicleId - 1) % vehicleColors.length];
+            const coords = feature.geometry.coordinates.map(c => [c[1], c[0]]);
             
-            // Create animated polyline for route
-            // Note: Using simple animated polyline instead of antPath for better compatibility
-            const routeLine = L.polyline(feature.geometry.coordinates.map(c => [c[1], c[0]]), {
+            // Create solid base polyline for route
+            const routeLine = L.polyline(coords, {
                 color: color,
-                weight: 4,
-                opacity: 0.8,
+                weight: 5,
+                opacity: 0.6,
                 smoothFactor: 1
             }).addTo(map);
             
-            // Add decorator for animated arrows
+            // Create animated dashed line on top (ant-path effect)
+            const animatedLine = L.polyline(coords, {
+                color: '#FFFFFF',
+                weight: 3,
+                opacity: 0.9,
+                dashArray: '10, 20',
+                dashOffset: '0',
+                smoothFactor: 1
+            }).addTo(map);
+            
+            // Animate the dash offset to create marching ants effect
+            let offset = 0;
+            const animationInterval = setInterval(() => {
+                offset = (offset + 1) % 30;
+                animatedLine.setStyle({ dashOffset: offset });
+            }, 50);
+            
+            // Add decorator for directional arrows
+            let decorator = null;
             try {
-                const decorator = L.polylineDecorator(routeLine, {
+                decorator = L.polylineDecorator(routeLine, {
                     patterns: [
                         {
-                            offset: '0%',
-                            repeat: 50,
+                            offset: '5%',
+                            repeat: 100,
                             symbol: L.Symbol.arrowHead({
-                                pixelSize: 8,
+                                pixelSize: 10,
                                 polygon: false,
                                 pathOptions: {
                                     color: color,
                                     fillOpacity: 1,
-                                    weight: 2,
-                                    opacity: 0.8
+                                    weight: 3,
+                                    opacity: 1
                                 }
                             })
                         }
                     ]
                 }).addTo(map);
-                
-                routeLayers.push({ layer: routeLine, decorator: decorator, vehicleId: vehicleId, color: color });
             } catch (e) {
-                console.warn('Decorator not available, using plain polyline:', e);
-                routeLayers.push({ layer: routeLine, vehicleId: vehicleId, color: color });
+                console.warn('Decorator not available:', e);
             }
             
             // Popup with info
-            routeLine.bindPopup(`
-                <strong>Vehicle ${vehicleId}</strong><br>
+            const popupContent = `
+                <strong>🚗 Vehicle ${vehicleId}</strong><br>
                 Length: ${feature.properties.length_m.toLocaleString()} m<br>
                 Nodes: ${feature.properties.num_nodes}
-            `);
+            `;
+            routeLine.bindPopup(popupContent);
+            animatedLine.bindPopup(popupContent);
+            
+            routeLayers.push({ 
+                layer: routeLine, 
+                decorator: decorator,
+                animatedLine: animatedLine,
+                animationInterval: animationInterval,
+                vehicleId: vehicleId, 
+                color: color 
+            });
         });
         
         // Create route toggles
@@ -384,7 +450,7 @@
         const legendDiv = document.getElementById('routeLegend');
         legendDiv.innerHTML = '';
         
-        routeLayers.forEach(({ layer, decorator, vehicleId, color }) => {
+        routeLayers.forEach(({ layer, decorator, animatedLine, vehicleId, color }) => {
             const checkDiv = document.createElement('div');
             checkDiv.className = 'route-checkbox';
             
@@ -396,9 +462,11 @@
                 if (this.checked) {
                     map.addLayer(layer);
                     if (decorator) map.addLayer(decorator);
+                    if (animatedLine) map.addLayer(animatedLine);
                 } else {
                     map.removeLayer(layer);
                     if (decorator) map.removeLayer(decorator);
+                    if (animatedLine) map.removeLayer(animatedLine);
                 }
             });
             
