@@ -2,3 +2,4 @@ venv/
 *.pyc
 .osm
 *.osm
+*.sqlite3
