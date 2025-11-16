@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.core.files.base import ContentFile
-from .models import OSMFile
+from .models import OSMFile, ComputationLog
 from .osm_utils import OSMProcessor
 from .routing_utils import OSMRoutePartitioner
 import os
@@ -262,6 +262,32 @@ def compute_routes(request, file_id):
             print(f"Error computing routes: {e}")
             import traceback
             traceback.print_exc()
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+def log_computation(request):
+    """Log computation performance metrics"""
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            
+            osm_record = get_object_or_404(OSMFile, id=data.get('file_id'))
+            
+            ComputationLog.objects.create(
+                osm_file=osm_record,
+                num_vehicles=data.get('num_vehicles'),
+                computation_time=data.get('computation_time'),
+                total_length_m=data.get('total_length', 0),
+                total_nodes=data.get('total_nodes', 0),
+                total_roads=data.get('total_roads', 0)
+            )
+            
+            return JsonResponse({'success': True})
+            
+        except Exception as e:
+            print(f"Error logging computation: {e}")
             return JsonResponse({'success': False, 'error': str(e)})
     
     return JsonResponse({'success': False, 'error': 'Invalid request method'})

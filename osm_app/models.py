@@ -33,3 +33,26 @@ class OSMFile(models.Model):
     
     def get_absolute_url(self):
         return f"/osm/{self.id}/"
+
+
+class ComputationLog(models.Model):
+    """Log computation performance metrics for optimization analysis"""
+    
+    osm_file = models.ForeignKey(OSMFile, on_delete=models.CASCADE, related_name='computation_logs')
+    num_vehicles = models.IntegerField()
+    computation_time = models.FloatField(help_text="Time in seconds")
+    total_length_m = models.FloatField(help_text="Total road length in meters")
+    total_nodes = models.IntegerField()
+    total_roads = models.IntegerField()
+    computed_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-computed_at']
+        indexes = [
+            models.Index(fields=['osm_file', '-computed_at']),
+            models.Index(fields=['num_vehicles']),
+        ]
+    
+    def __str__(self):
+        return f"{self.osm_file.file_name} - {self.num_vehicles} vehicles - {self.computation_time:.2f}s"
+

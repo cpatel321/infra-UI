@@ -12,4 +12,5 @@ urlpatterns = [
     path('get-osm-data/<int:file_id>/', views.get_osm_data, name='get_osm_data'),
     path('route-planning/<int:file_id>/', views.route_planning, name='route_planning'),
     path('compute-routes/<int:file_id>/', views.compute_routes, name='compute_routes'),
+    path('log-computation/', views.log_computation, name='log_computation'),
 ]

@@ -119,6 +119,34 @@
         font-weight: 600;
         text-align: center;
     }
+    .panel-collapse-btn {
+        background: none;
+        border: none;
+        color: #667eea;
+        cursor: pointer;
+        padding: 0;
+        font-size: 1.2em;
+        transition: transform 0.3s ease;
+    }
+    .panel-collapse-btn.collapsed {
+        transform: rotate(-90deg);
+    }
+    .collapsible-content {
+        max-height: 1000px;
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+    }
+    .collapsible-content.collapsed {
+        max-height: 0;
+    }
+    .computation-timer {
+        background: #f8f9fa;
+        padding: 8px;
+        border-radius: 5px;
+        margin: 10px 0;
+        font-family: 'Courier New', monospace;
+        text-align: center;
+    }
 </style>
 {% endblock %}
 
@@ -180,16 +208,24 @@
     <div class="col-lg-3">
         <!-- Controls Panel -->
         <div class="controls-panel">
-            <h6>🚗 Vehicle Parameters</h6>
-            
-            <!-- Vehicle Speed -->
-            <div class="mb-3">
-                <label for="vehicleSpeed" class="form-label">Vehicle Speed (km/h):</label>
-                <input type="number" class="form-control" id="vehicleSpeed" value="25" min="5" max="80" step="5">
-                <small class="text-muted">Average collection speed</small>
+            <div class="d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">🚗 Vehicle Parameters</h6>
+                <button class="panel-collapse-btn" id="collapseParamsBtn" type="button">
+                    ▼
+                </button>
             </div>
             
-            <!-- Time Window -->
+            <div class="collapsible-content" id="parametersContent">
+                <hr>
+                
+                <!-- Vehicle Speed -->
+                <div class="mb-3">
+                    <label for="vehicleSpeed" class="form-label">Vehicle Speed (km/h):</label>
+                    <input type="number" class="form-control" id="vehicleSpeed" value="25" min="5" max="80" step="5">
+                    <small class="text-muted">Average collection speed</small>
+                </div>
+                
+                <!-- Time Window -->
             <div class="mb-3">
                 <label for="timeWindow" class="form-label">Time Window (hours):</label>
                 <input type="number" class="form-control" id="timeWindow" value="4" min="1" max="12" step="0.5">
@@ -216,6 +252,13 @@
                 </div>
                 <small class="text-muted">Manual override or use suggestion</small>
             </div>
+            </div>
+            <!-- End collapsible content -->
+            
+            <!-- Computation Timer -->
+            <div class="computation-timer" id="computationTimer" style="display: none;">
+                ⏱️ Computing: <strong id="timerDisplay">0.0s</strong>
+            </div>
             
             <button id="computeBtn" class="btn btn-primary w-100 mb-2">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle;">
@@ -232,6 +275,17 @@
             <div id="routeInfo" style="display: none;">
                 <hr>
                 <p class="text-success">✓ Routes computed successfully!</p>
+                <div class="computation-timer">
+                    ⏱️ Computed in: <strong id="finalTime">0.0s</strong>
+                </div>
+                <button id="downloadGeoJSONBtn" class="btn btn-success w-100 mt-2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle;">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Download GeoJSON
+                </button>
                 <p class="text-muted" style="font-size: 0.85em;">Starting/Ending point: Map centroid</p>
             </div>
         </div>
@@ -382,6 +436,66 @@
         calculateSuggestedVehicles();
     }
     
+    // Collapsible panel control
+    document.getElementById('collapseParamsBtn').addEventListener('click', function() {
+        const content = document.getElementById('parametersContent');
+        const btn = this;
+        
+        if (content.classList.contains('collapsed')) {
+            content.classList.remove('collapsed');
+            btn.classList.remove('collapsed');
+            btn.textContent = '▼';
+        } else {
+            content.classList.add('collapsed');
+            btn.classList.add('collapsed');
+            btn.textContent = '▶';
+        }
+    });
+    
+    // Timer variables
+    let startTime = null;
+    let timerInterval = null;
+    let computedRoutesData = null;
+    
+    function startTimer() {
+        startTime = Date.now();
+        document.getElementById('computationTimer').style.display = 'block';
+        
+        timerInterval = setInterval(() => {
+            const elapsed = (Date.now() - startTime) / 1000;
+            document.getElementById('timerDisplay').textContent = elapsed.toFixed(1) + 's';
+        }, 100);
+    }
+    
+    function stopTimer() {
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+        
+        const elapsed = (Date.now() - startTime) / 1000;
+        document.getElementById('finalTime').textContent = elapsed.toFixed(2) + 's';
+        document.getElementById('computationTimer').style.display = 'none';
+        
+        return elapsed;
+    }
+    
+    // Download GeoJSON button
+    document.getElementById('downloadGeoJSONBtn').addEventListener('click', function() {
+        if (computedRoutesData) {
+            const dataStr = JSON.stringify(computedRoutesData, null, 2);
+            const dataBlob = new Blob([dataStr], {type: 'application/json'});
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `routes_${Date.now()}.geojson`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+    });
+    
     // Compute routes button
     document.getElementById('computeBtn').addEventListener('click', function() {
         const k = parseInt(document.getElementById('numVehicles').value);
@@ -390,6 +504,9 @@
             alert('Please enter a number between 1 and 20');
             return;
         }
+        
+        // Start timer
+        startTimer();
         
         // Show loading
         document.getElementById('loadingIndicator').style.display = 'block';
@@ -407,24 +524,51 @@
         })
         .then(response => response.json())
         .then(data => {
+            // Stop timer
+            const computationTime = stopTimer();
+            
             document.getElementById('loadingIndicator').style.display = 'none';
             document.getElementById('computeBtn').disabled = false;
             
             if (data.success) {
+                computedRoutesData = data.routes;
                 routeData = data.routes;
                 displayRoutes(data.routes);
                 updateStatistics(data.stats);
                 document.getElementById('routeInfo').style.display = 'block';
+                
+                // Log computation time to backend
+                logComputationMetrics({
+                    file_id: {{ osm_file.id }},
+                    num_vehicles: k,
+                    computation_time: computationTime,
+                    total_length: {{ stats.total_length_m|default:"0" }},
+                    total_nodes: {{ stats.total_nodes|default:"0" }},
+                    total_roads: {{ stats.total_roads|default:"0" }}
+                });
             } else {
                 alert('Error: ' + data.error);
             }
         })
         .catch(error => {
+            stopTimer();
             document.getElementById('loadingIndicator').style.display = 'none';
             document.getElementById('computeBtn').disabled = false;
             alert('Error computing routes: ' + error);
         });
     });
+    
+    // Log computation metrics to backend
+    function logComputationMetrics(data) {
+        fetch("{% url 'osm_app:log_computation' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify(data)
+        }).catch(err => console.log('Failed to log metrics:', err));
+    }
     
     function displayRoutes(routesGeoJSON) {
         // Clear existing routes
