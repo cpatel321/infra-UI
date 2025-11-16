@@ -4,11 +4,13 @@ from django.contrib import messages
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.core.files.base import ContentFile
-from .models import OSMFile, ComputationLog
+from .models import OSMFile, ComputationLog, WardConfiguration, Ward
 from .osm_utils import OSMProcessor
 from .routing_utils import OSMRoutePartitioner
+from .ward_utils import divide_area_into_wards, extract_ward_osm_data, calculate_ward_statistics, calculate_area_km2
 import os
 import json
+import tempfile
 
 
 def index(request):
@@ -288,6 +290,161 @@ def log_computation(request):
             
         except Exception as e:
             print(f"Error logging computation: {e}")
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+def ward_config(request, file_id):
+    """Display ward configuration page - intermediate page between crop and route planning"""
+    osm_record = get_object_or_404(OSMFile, id=file_id)
+    
+    if not osm_record.processed_file:
+        messages.error(request, 'No processed file available')
+        return redirect('osm_app:index')
+    
+    # Calculate total area
+    total_area_km2 = calculate_area_km2(
+        osm_record.min_lat, osm_record.max_lat,
+        osm_record.min_lon, osm_record.max_lon
+    )
+    
+    return render(request, 'osm_app/ward_config.html', {
+        'osm_file': osm_record,
+        'total_area_km2': total_area_km2
+    })
+
+
+def create_ward_config(request, file_id):
+    """Create ward configuration and divide area into wards"""
+    osm_record = get_object_or_404(OSMFile, id=file_id)
+    
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            num_wards = int(data.get('num_wards', 4))
+            ward_layout = data.get('ward_layout', 'auto_grid')
+            
+            if num_wards < 2 or num_wards > 100:
+                return JsonResponse({'success': False, 'error': 'Number of wards must be between 2 and 100'})
+            
+            # Create ward configuration
+            config = divide_area_into_wards(osm_record, num_wards, ward_layout)
+            
+            # Calculate statistics for each ward
+            for ward in config.wards.all():
+                try:
+                    # Extract OSM data for this ward
+                    ward_osm_xml = extract_ward_osm_data(osm_record.processed_file.path, ward)
+                    
+                    # Calculate statistics
+                    calculate_ward_statistics(ward_osm_xml, ward)
+                except Exception as e:
+                    print(f"Error calculating statistics for ward {ward.ward_number}: {e}")
+            
+            return JsonResponse({
+                'success': True,
+                'config_id': config.id
+            })
+            
+        except Exception as e:
+            print(f"Error creating ward configuration: {e}")
+            import traceback
+            traceback.print_exc()
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+def multiward_routing(request, file_id):
+    """Display multi-ward routing page with map and per-ward vehicle controls"""
+    osm_record = get_object_or_404(OSMFile, id=file_id)
+    
+    config_id = request.GET.get('config_id')
+    if not config_id:
+        messages.error(request, 'No ward configuration specified')
+        return redirect('osm_app:ward_config', file_id=file_id)
+    
+    config = get_object_or_404(WardConfiguration, id=config_id, osm_file=osm_record)
+    wards = list(config.wards.all())
+    
+    # Prepare ward data for JavaScript
+    wards_data = []
+    for ward in wards:
+        wards_data.append({
+            'id': ward.id,
+            'ward_number': ward.ward_number,
+            'min_lat': ward.min_lat,
+            'max_lat': ward.max_lat,
+            'min_lon': ward.min_lon,
+            'max_lon': ward.max_lon,
+            'centroid_lat': ward.centroid_lat,
+            'centroid_lon': ward.centroid_lon,
+            'area_km2': ward.area_km2,
+            'total_nodes': ward.total_nodes,
+            'total_roads': ward.total_roads,
+            'total_length_m': ward.total_length_m
+        })
+    
+    return render(request, 'osm_app/multiward_routing.html', {
+        'osm_file': osm_record,
+        'config': config,
+        'wards_json': json.dumps(wards_data)
+    })
+
+
+def compute_ward_route(request, file_id):
+    """Compute optimal routes for a specific ward"""
+    osm_record = get_object_or_404(OSMFile, id=file_id)
+    
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            ward_id = data.get('ward_id')
+            num_vehicles = int(data.get('num_vehicles', 1))
+            
+            ward = get_object_or_404(Ward, id=ward_id)
+            
+            # Extract OSM data for this ward
+            ward_osm_xml = extract_ward_osm_data(osm_record.processed_file.path, ward)
+            
+            # Create temporary file for ward OSM data
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.osm', delete=False) as tmp_file:
+                tmp_file.write(ward_osm_xml)
+                tmp_file_path = tmp_file.name
+            
+            try:
+                # Run routing algorithm on ward
+                import time
+                start_time = time.time()
+                
+                partitioner = OSMRoutePartitioner(tmp_file_path)
+                routes_geojson = partitioner.compute_routes(num_vehicles)
+                
+                computation_time = time.time() - start_time
+                
+                # Update ward with results
+                ward.num_vehicles = num_vehicles
+                ward.routes_geojson = routes_geojson
+                ward.computation_time = computation_time
+                ward.computed_at = timezone.now()
+                ward.save()
+                
+                return JsonResponse({
+                    'success': True,
+                    'routes': routes_geojson,
+                    'computation_time': computation_time
+                })
+                
+            finally:
+                # Clean up temporary file
+                if os.path.exists(tmp_file_path):
+                    os.unlink(tmp_file_path)
+            
+        except Exception as e:
+            print(f"Error computing ward route: {e}")
+            import traceback
+            traceback.print_exc()
             return JsonResponse({'success': False, 'error': str(e)})
     
     return JsonResponse({'success': False, 'error': 'Invalid request method'})

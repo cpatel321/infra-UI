@@ -1,0 +1,634 @@
+{% extends 'base.html' %}
+
+{% block title %}Multi-Ward Route Planning - OSM Processor{% endblock %}
+
+{% block extra_css %}
+<style>
+    #map {
+        height: 600px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .ward-controls {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+    
+    .ward-item {
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        padding: 15px;
+        margin-bottom: 10px;
+        background: #f8f9fa;
+        transition: all 0.2s ease;
+    }
+    
+    .ward-item:hover {
+        background: #e9ecef;
+        border-color: #6366f1;
+    }
+    
+    .ward-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    
+    .ward-title {
+        font-weight: 600;
+        font-size: 1.1em;
+        color: #333;
+    }
+    
+    .ward-color-box {
+        width: 30px;
+        height: 30px;
+        border-radius: 4px;
+        border: 2px solid #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    
+    .ward-stats {
+        font-size: 0.85em;
+        color: #666;
+        margin-bottom: 10px;
+    }
+    
+    .ward-vehicle-input {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .ward-vehicle-input input {
+        width: 80px;
+    }
+    
+    .stats-table {
+        margin-top: 20px;
+    }
+    
+    .stats-table table {
+        font-size: 0.9em;
+    }
+    
+    .progress-section {
+        margin-top: 20px;
+        display: none;
+    }
+    
+    .progress-section.active {
+        display: block;
+    }
+    
+    .progress {
+        height: 30px;
+        font-size: 1em;
+    }
+    
+    .progress-bar {
+        transition: width 0.3s ease;
+    }
+    
+    .compute-btn {
+        padding: 12px 40px;
+        font-size: 1.1em;
+        margin-top: 20px;
+    }
+    
+    .ward-boundary {
+        stroke: #6366f1;
+        stroke-width: 2;
+        fill: transparent;
+        stroke-dasharray: 5, 5;
+    }
+    
+    .ward-label {
+        background: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        border: 2px solid #6366f1;
+        font-weight: 600;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    
+    .collapsible-header {
+        cursor: pointer;
+        user-select: none;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        margin-bottom: 10px;
+        transition: background 0.2s;
+    }
+    
+    .collapsible-header:hover {
+        background: #e9ecef;
+    }
+    
+    .collapsible-content {
+        max-height: 600px;
+        overflow: auto;
+        transition: max-height 0.3s ease;
+    }
+    
+    .collapsible-content.collapsed {
+        max-height: 0;
+        overflow: hidden;
+    }
+    
+    .toggle-arrow {
+        transition: transform 0.3s ease;
+        font-size: 1.2em;
+    }
+    
+    .toggle-arrow.collapsed {
+        transform: rotate(-90deg);
+    }
+    
+    .download-section {
+        margin-top: 20px;
+        display: none;
+    }
+    
+    .download-section.active {
+        display: block;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row mb-3">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">🗺️ Multi-Ward Route Planning</h4>
+                </div>
+                <div class="card-body">
+                    <p class="mb-0">
+                        <strong>Area:</strong> {{ osm_file.file_name }} | 
+                        <strong>Configuration:</strong> {{ config.num_wards }} wards ({{ config.grid_rows }} × {{ config.grid_cols }})
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Map Section -->
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0">Ward Boundaries & Routes</h5>
+                </div>
+                <div class="card-body">
+                    <div id="map"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls Section -->
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">⚙️ Ward Configuration</h5>
+                </div>
+                <div class="card-body">
+                    <!-- Global Parameters -->
+                    <div class="form-group">
+                        <label><strong>Vehicle Speed (km/h):</strong></label>
+                        <input type="number" class="form-control" id="vehicleSpeed" value="30" min="1" max="100">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label><strong>Time Window (hours):</strong></label>
+                        <input type="number" class="form-control" id="timeWindow" value="8" min="1" max="24" step="0.5">
+                    </div>
+
+                    <hr>
+
+                    <!-- Ward Controls -->
+                    <div class="collapsible-header" onclick="toggleSection('wardControls')">
+                        <strong>🏘️ Ward Vehicle Assignment</strong>
+                        <span class="toggle-arrow" id="wardControlsArrow">▼</span>
+                    </div>
+                    <div class="collapsible-content" id="wardControls">
+                        <div id="wardControlsList">
+                            <!-- Ward controls will be dynamically added here -->
+                        </div>
+                    </div>
+
+                    <!-- Compute Button -->
+                    <button class="btn btn-success btn-block compute-btn" onclick="computeAllWardRoutes()">
+                        <i class="fas fa-route"></i> Calculate Optimal Paths
+                    </button>
+
+                    <!-- Progress Section -->
+                    <div class="progress-section" id="progressSection">
+                        <h6><strong>Computation Progress:</strong></h6>
+                        <div class="progress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                                 id="progressBar" role="progressbar" style="width: 0%">
+                                0 / 0 wards
+                            </div>
+                        </div>
+                        <div class="mt-2 text-center" id="progressStatus">
+                            <small class="text-muted">Preparing...</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ward Statistics Table -->
+            <div class="card mt-3">
+                <div class="card-header bg-secondary text-white">
+                    <div class="collapsible-header" onclick="toggleSection('wardStats')" style="background: transparent; padding: 0; margin: 0;">
+                        <strong>📊 Ward Statistics</strong>
+                        <span class="toggle-arrow" id="wardStatsArrow">▼</span>
+                    </div>
+                </div>
+                <div class="card-body collapsible-content" id="wardStats">
+                    <div class="stats-table">
+                        <table class="table table-sm table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Ward</th>
+                                    <th>Vehicles</th>
+                                    <th>Roads</th>
+                                    <th>Length (km)</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="wardStatsTable">
+                                <!-- Stats will be populated here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Download Section -->
+            <div class="download-section" id="downloadSection">
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <h6 class="mb-0">💾 Download Results</h6>
+                    </div>
+                    <div class="card-body">
+                        <button class="btn btn-primary btn-block" onclick="downloadAllRoutes()">
+                            <i class="fas fa-download"></i> Download All Ward Routes (GeoJSON)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.js"></script>
+
+<script>
+    const configId = {{ config.id }};
+    const osmFileId = {{ osm_file.id }};
+    const wards = {{ wards_json|safe }};
+    
+    const wardColors = [
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+        '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B739', '#52B788',
+        '#E63946', '#457B9D', '#F77F00', '#06D6A0', '#118AB2'
+    ];
+    
+    let map;
+    let wardLayers = {};
+    let wardRoutes = {};
+    let computedWards = 0;
+    
+    // Initialize map
+    function initMap() {
+        const centerLat = {{ config.osm_file.min_lat }} + ({{ config.osm_file.max_lat }} - {{ config.osm_file.min_lat }}) / 2;
+        const centerLon = {{ config.osm_file.min_lon }} + ({{ config.osm_file.max_lon }} - {{ config.osm_file.min_lon }}) / 2;
+        
+        map = L.map('map').setView([centerLat, centerLon], 13);
+        
+        // Satellite tiles
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri',
+            maxZoom: 19
+        }).addTo(map);
+        
+        // Draw ward boundaries and centroids
+        wards.forEach((ward, index) => {
+            const color = wardColors[index % wardColors.length];
+            
+            // Draw boundary rectangle
+            const bounds = [[ward.min_lat, ward.min_lon], [ward.max_lat, ward.max_lon]];
+            const rectangle = L.rectangle(bounds, {
+                color: color,
+                weight: 2,
+                fillOpacity: 0.1,
+                className: 'ward-boundary'
+            }).addTo(map);
+            
+            // Add ward label
+            const center = [(ward.min_lat + ward.max_lat) / 2, (ward.min_lon + ward.max_lon) / 2];
+            const marker = L.marker(center, {
+                icon: L.divIcon({
+                    className: 'ward-label',
+                    html: `Ward ${ward.ward_number}`,
+                    iconSize: [80, 30],
+                    iconAnchor: [40, 15]
+                })
+            }).addTo(map);
+            
+            // Add centroid marker
+            const centroidMarker = L.circleMarker([ward.centroid_lat, ward.centroid_lon], {
+                radius: 8,
+                fillColor: color,
+                color: '#fff',
+                weight: 2,
+                fillOpacity: 1
+            }).addTo(map);
+            
+            centroidMarker.bindPopup(`<strong>Ward ${ward.ward_number} Depot</strong><br>Centroid Location`);
+            
+            wardLayers[ward.ward_number] = {
+                boundary: rectangle,
+                label: marker,
+                centroid: centroidMarker,
+                color: color
+            };
+        });
+        
+        // Fit bounds to show all wards
+        const overallBounds = [
+            [{{ config.osm_file.min_lat }}, {{ config.osm_file.min_lon }}],
+            [{{ config.osm_file.max_lat }}, {{ config.osm_file.max_lon }}]
+        ];
+        map.fitBounds(overallBounds);
+    }
+    
+    // Initialize ward controls
+    function initWardControls() {
+        const controlsList = document.getElementById('wardControlsList');
+        const statsTable = document.getElementById('wardStatsTable');
+        
+        wards.forEach((ward, index) => {
+            const color = wardColors[index % wardColors.length];
+            
+            // Create control item
+            const wardItem = document.createElement('div');
+            wardItem.className = 'ward-item';
+            wardItem.innerHTML = `
+                <div class="ward-header">
+                    <span class="ward-title">Ward ${ward.ward_number}</span>
+                    <div class="ward-color-box" style="background-color: ${color}"></div>
+                </div>
+                <div class="ward-stats">
+                    <small>Area: ${ward.area_km2.toFixed(2)} km² | Roads: ${ward.total_roads || 'N/A'}</small>
+                </div>
+                <div class="ward-vehicle-input">
+                    <label><small><strong>Vehicles:</strong></small></label>
+                    <input type="number" class="form-control form-control-sm" 
+                           id="vehicles_${ward.ward_number}" value="2" min="1" max="20">
+                    <button class="btn btn-sm btn-outline-primary" onclick="autoSuggestVehicles(${ward.ward_number})">
+                        <small>Auto</small>
+                    </button>
+                </div>
+            `;
+            controlsList.appendChild(wardItem);
+            
+            // Create stats table row
+            const statsRow = document.createElement('tr');
+            statsRow.id = `stats_row_${ward.ward_number}`;
+            statsRow.innerHTML = `
+                <td><strong>${ward.ward_number}</strong></td>
+                <td id="stats_vehicles_${ward.ward_number}">-</td>
+                <td>${ward.total_roads || 'N/A'}</td>
+                <td>${ward.total_length_m ? (ward.total_length_m / 1000).toFixed(2) : 'N/A'}</td>
+                <td><span class="badge badge-secondary" id="stats_status_${ward.ward_number}">Pending</span></td>
+            `;
+            statsTable.appendChild(statsRow);
+        });
+    }
+    
+    // Auto-suggest vehicles for a ward
+    function autoSuggestVehicles(wardNumber) {
+        const ward = wards.find(w => w.ward_number === wardNumber);
+        if (!ward || !ward.total_length_m) {
+            alert('Ward statistics not available yet.');
+            return;
+        }
+        
+        const speed = parseFloat(document.getElementById('vehicleSpeed').value);
+        const timeWindow = parseFloat(document.getElementById('timeWindow').value);
+        
+        const totalLengthKm = ward.total_length_m / 1000;
+        const timeNeeded = totalLengthKm / speed;
+        const suggestedVehicles = Math.ceil(timeNeeded / timeWindow);
+        
+        document.getElementById(`vehicles_${wardNumber}`).value = Math.max(1, suggestedVehicles);
+    }
+    
+    // Compute routes for all wards
+    async function computeAllWardRoutes() {
+        computedWards = 0;
+        wardRoutes = {};
+        
+        // Show progress section
+        document.getElementById('progressSection').classList.add('active');
+        document.querySelector('.compute-btn').disabled = true;
+        
+        // Update progress
+        updateProgress(0, wards.length, 'Starting computation...');
+        
+        // Compute each ward sequentially (can be parallelized if backend supports)
+        for (const ward of wards) {
+            await computeWardRoute(ward);
+        }
+        
+        // All done
+        updateProgress(wards.length, wards.length, 'All wards completed!');
+        document.querySelector('.compute-btn').disabled = false;
+        document.getElementById('downloadSection').classList.add('active');
+    }
+    
+    // Compute route for a single ward
+    async function computeWardRoute(ward) {
+        const wardNumber = ward.ward_number;
+        const numVehicles = parseInt(document.getElementById(`vehicles_${wardNumber}`).value);
+        
+        // Update status
+        const statusBadge = document.getElementById(`stats_status_${wardNumber}`);
+        statusBadge.className = 'badge badge-warning';
+        statusBadge.textContent = 'Computing...';
+        
+        document.getElementById(`stats_vehicles_${wardNumber}`).textContent = numVehicles;
+        
+        try {
+            const response = await fetch(`/${osmFileId}/compute-ward-route/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    ward_id: ward.id,
+                    num_vehicles: numVehicles
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                // Store routes
+                wardRoutes[wardNumber] = data.routes;
+                
+                // Display routes on map
+                displayWardRoutes(ward, data.routes);
+                
+                // Update status
+                statusBadge.className = 'badge badge-success';
+                statusBadge.textContent = 'Complete';
+                
+                computedWards++;
+                updateProgress(computedWards, wards.length, `Ward ${wardNumber} completed`);
+            } else {
+                throw new Error(data.error || 'Computation failed');
+            }
+        } catch (error) {
+            console.error(`Error computing ward ${wardNumber}:`, error);
+            statusBadge.className = 'badge badge-danger';
+            statusBadge.textContent = 'Error';
+            
+            updateProgress(computedWards, wards.length, `Ward ${wardNumber} failed: ${error.message}`);
+        }
+    }
+    
+    // Display routes for a ward on the map
+    function displayWardRoutes(ward, routes) {
+        const color = wardLayers[ward.ward_number].color;
+        
+        routes.features.forEach((feature, index) => {
+            const coords = feature.geometry.coordinates.map(c => [c[1], c[0]]);
+            
+            // Main route line
+            const routeLine = L.polyline(coords, {
+                color: color,
+                weight: 4,
+                opacity: 0.7
+            }).addTo(map);
+            
+            // Animated dashed overlay
+            const dashedLine = L.polyline(coords, {
+                color: color,
+                weight: 2,
+                opacity: 0.8,
+                dashArray: '10, 10',
+                className: 'marching-ants'
+            }).addTo(map);
+            
+            // Directional arrows
+            const decorator = L.polylineDecorator(routeLine, {
+                patterns: [
+                    {
+                        offset: '10%',
+                        repeat: 100,
+                        symbol: L.Symbol.arrowHead({
+                            pixelSize: 12,
+                            polygon: false,
+                            pathOptions: {
+                                stroke: true,
+                                weight: 2,
+                                color: color
+                            }
+                        })
+                    }
+                ]
+            }).addTo(map);
+            
+            routeLine.bindPopup(`<strong>Ward ${ward.ward_number} - Vehicle ${index + 1}</strong>`);
+        });
+    }
+    
+    // Update progress bar
+    function updateProgress(current, total, message) {
+        const percentage = (current / total) * 100;
+        const progressBar = document.getElementById('progressBar');
+        progressBar.style.width = percentage + '%';
+        progressBar.textContent = `${current} / ${total} wards`;
+        
+        document.getElementById('progressStatus').innerHTML = `<small>${message}</small>`;
+    }
+    
+    // Download all routes
+    function downloadAllRoutes() {
+        const allRoutes = {
+            type: 'FeatureCollection',
+            features: []
+        };
+        
+        Object.values(wardRoutes).forEach(wardRoute => {
+            allRoutes.features.push(...wardRoute.features);
+        });
+        
+        const blob = new Blob([JSON.stringify(allRoutes, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `multiward_routes_${configId}.geojson`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+    
+    // Toggle collapsible sections
+    function toggleSection(sectionId) {
+        const content = document.getElementById(sectionId);
+        const arrow = document.getElementById(sectionId + 'Arrow');
+        
+        content.classList.toggle('collapsed');
+        arrow.classList.toggle('collapsed');
+    }
+    
+    // Get CSRF token
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+    
+    // Initialize on load
+    window.addEventListener('DOMContentLoaded', function() {
+        initMap();
+        initWardControls();
+    });
+</script>
+
+<style>
+    @keyframes marchingAnts {
+        0% { stroke-dashoffset: 0; }
+        100% { stroke-dashoffset: 20; }
+    }
+    
+    .marching-ants {
+        animation: marchingAnts 1s linear infinite;
+    }
+</style>
+{% endblock %}
