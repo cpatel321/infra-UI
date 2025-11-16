@@ -46,17 +46,6 @@
         margin-bottom: 10px;
         font-weight: 600;
     }
-    .vehicle-colors {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 10px;
-    }
-    .color-item {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-    }
     .color-box {
         width: 20px;
         height: 20px;
@@ -290,20 +279,59 @@
             </div>
         </div>
         
+        <!-- Vehicle Distance & Fuel Panel -->
+        <div class="controls-panel" id="vehicleDistancePanel" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">🚗 Vehicle Statistics</h6>
+                <button class="panel-collapse-btn" id="vehicleStatsCollapseBtn" type="button">▼</button>
+            </div>
+            <div class="collapsible-content" id="vehicleStatsContent">
+                <div id="vehicleDistanceList" style="margin-bottom: 15px;">
+                    <!-- Vehicle distances will be populated here -->
+                </div>
+                
+                <hr style="margin: 10px 0;">
+                
+                <div class="stat-item">
+                    <span class="stat-label">Total Network Length:</span>
+                    <span class="stat-value" id="totalNetworkLength">0 km</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Total Distance Traveled:</span>
+                    <span class="stat-value" id="totalDistanceTraveled">0 km</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Coverage Efficiency:</span>
+                    <span class="stat-value" id="coverageEfficiency">0%</span>
+                </div>
+                
+                <hr style="margin: 10px 0;">
+                
+                <h6 style="margin-top: 15px; margin-bottom: 10px;">⛽ Fuel Calculator</h6>
+                <div class="form-group mb-2">
+                    <label for="fuelEfficiency" style="font-size: 0.9em; display: block; margin-bottom: 5px;">
+                        Fuel Efficiency (km/L):
+                    </label>
+                    <input type="number" id="fuelEfficiency" class="form-control form-control-sm" 
+                           min="1" max="50" step="0.1" value="8" 
+                           style="font-size: 0.9em;">
+                </div>
+                <div class="stat-item" style="background: #e8f5e9; padding: 8px; border-radius: 5px; margin-top: 10px;">
+                    <span class="stat-label">💧 Fuel Required:</span>
+                    <span class="stat-value" id="fuelRequired" style="color: #2e7d32; font-weight: bold;">0 L</span>
+                </div>
+                <div class="stat-item" style="font-size: 0.85em; color: #666; margin-top: 8px;">
+                    <span class="stat-label">Per Vehicle Average:</span>
+                    <span class="stat-value" id="fuelPerVehicle">0 L</span>
+                </div>
+            </div>
+        </div>
+        
         <!-- Route Toggle Panel -->
         <div class="controls-panel" id="routeToggles" style="display: none;">
             <h6>🗺️ Route Visibility</h6>
             <div class="route-legend" id="routeLegend">
                 <!-- Checkboxes will be added dynamically -->
-            </div>
-        </div>
-        
-        <!-- Vehicle Colors Legend -->
-        <div class="controls-panel">
-            <h6>🎨 Vehicle Colors</h6>
-            <div class="vehicle-colors" id="colorLegend">
-                <!-- Will be populated after route computation -->
-                <small class="text-muted">Colors will be assigned after route computation</small>
             </div>
         </div>
     </div>
@@ -451,6 +479,25 @@
             btn.textContent = '▶';
         }
     });
+    
+    // Vehicle statistics panel collapse
+    document.getElementById('vehicleStatsCollapseBtn').addEventListener('click', function() {
+        const content = document.getElementById('vehicleStatsContent');
+        const btn = this;
+        
+        if (content.classList.contains('collapsed')) {
+            content.classList.remove('collapsed');
+            btn.classList.remove('collapsed');
+            btn.textContent = '▼';
+        } else {
+            content.classList.add('collapsed');
+            btn.classList.add('collapsed');
+            btn.textContent = '▶';
+        }
+    });
+    
+    // Fuel efficiency input - calculate on change
+    document.getElementById('fuelEfficiency').addEventListener('input', calculateFuelRequirements);
     
     // Timer variables
     let startTime = null;
@@ -658,8 +705,8 @@
         // Create route toggles
         createRouteToggles();
         
-        // Update color legend
-        updateColorLegend();
+        // Update vehicle statistics and fuel calculator
+        updateVehicleStatistics(routesGeoJSON);
     }
     
     function createRouteToggles() {
@@ -703,28 +750,6 @@
         document.getElementById('routeToggles').style.display = 'block';
     }
     
-    function updateColorLegend() {
-        const legendDiv = document.getElementById('colorLegend');
-        legendDiv.innerHTML = '';
-        
-        routeLayers.forEach(({ vehicleId, color }) => {
-            const item = document.createElement('div');
-            item.className = 'color-item';
-            
-            const box = document.createElement('div');
-            box.className = 'color-box';
-            box.style.backgroundColor = color;
-            
-            const label = document.createElement('span');
-            label.textContent = `V${vehicleId}`;
-            label.style.fontSize = '0.85em';
-            
-            item.appendChild(box);
-            item.appendChild(label);
-            legendDiv.appendChild(item);
-        });
-    }
-    
     function updateStatistics(stats) {
         if (stats.total_roads) {
             document.getElementById('totalRoads').textContent = stats.total_roads.toLocaleString();
@@ -744,6 +769,81 @@
             document.getElementById('depotLocation').textContent = 
                 `${stats.centroid[0].toFixed(6)}, ${stats.centroid[1].toFixed(6)}`;
         }
+    }
+    
+    // Update vehicle distance breakdown and fuel calculator
+    function updateVehicleStatistics(routesGeoJSON) {
+        const vehicleDistanceList = document.getElementById('vehicleDistanceList');
+        vehicleDistanceList.innerHTML = '';
+        
+        let totalDistanceTraveled = 0;
+        const vehicleDistances = [];
+        
+        routesGeoJSON.features.forEach(feature => {
+            const vehicleId = feature.properties.vehicle_id;
+            const distanceM = feature.properties.length_m;
+            const distanceKm = distanceM / 1000;
+            const nodes = feature.properties.num_nodes;
+            
+            totalDistanceTraveled += distanceKm;
+            vehicleDistances.push({ vehicleId, distanceKm, nodes });
+            
+            // Create distance item
+            const item = document.createElement('div');
+            item.style.cssText = 'padding: 6px 8px; background: #f8f9fa; border-radius: 4px; margin-bottom: 6px; font-size: 0.9em;';
+            
+            const color = getVehicleColor(vehicleId);
+            item.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 12px; height: 12px; background: ${color}; border-radius: 2px; flex-shrink: 0;"></div>
+                    <div style="flex: 1;">
+                        <strong>Vehicle ${vehicleId}</strong>: ${distanceKm.toFixed(2)} km (${nodes} nodes)
+                    </div>
+                </div>
+            `;
+            vehicleDistanceList.appendChild(item);
+        });
+        
+        // Update totals
+        const totalNetworkKm = {{ stats.total_length_km|default:"0" }};
+        document.getElementById('totalNetworkLength').textContent = totalNetworkKm.toFixed(2) + ' km';
+        document.getElementById('totalDistanceTraveled').textContent = totalDistanceTraveled.toFixed(2) + ' km';
+        
+        // Calculate coverage efficiency
+        const efficiency = totalNetworkKm > 0 ? (totalNetworkKm / totalDistanceTraveled * 100) : 0;
+        document.getElementById('coverageEfficiency').textContent = efficiency.toFixed(1) + '%';
+        
+        // Store for fuel calculation
+        window.vehicleDistances = { totalDistanceTraveled, totalNetworkKm, vehicleCount: vehicleDistances.length };
+        
+        // Calculate fuel
+        calculateFuelRequirements();
+        
+        // Show the panel
+        document.getElementById('vehicleDistancePanel').style.display = 'block';
+    }
+    
+    function calculateFuelRequirements() {
+        if (!window.vehicleDistances) return;
+        
+        const fuelEfficiency = parseFloat(document.getElementById('fuelEfficiency').value);
+        if (!fuelEfficiency || fuelEfficiency <= 0) return;
+        
+        const { totalDistanceTraveled, vehicleCount } = window.vehicleDistances;
+        const totalFuelRequired = totalDistanceTraveled / fuelEfficiency;
+        const fuelPerVehicle = totalFuelRequired / vehicleCount;
+        
+        document.getElementById('fuelRequired').textContent = totalFuelRequired.toFixed(2) + ' L';
+        document.getElementById('fuelPerVehicle').textContent = fuelPerVehicle.toFixed(2) + ' L';
+    }
+    
+    function getVehicleColor(vehicleId) {
+        const colors = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', 
+            '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2',
+            '#F8B195', '#C06C84', '#6C5B7B', '#355C7D'
+        ];
+        return colors[(vehicleId - 1) % colors.length];
     }
 </script>
 {% endblock %}
