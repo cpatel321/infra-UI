@@ -3,6 +3,7 @@
 {% block title %}Multi-Ward Route Planning - OSM Processor{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
     #map {
         height: 600px;
@@ -473,6 +474,8 @@
         
         document.getElementById(`stats_vehicles_${wardNumber}`).textContent = numVehicles;
         
+        console.log(`Starting computation for Ward ${wardNumber} with ${numVehicles} vehicles`);
+        
         try {
             const response = await fetch(`/${osmFileId}/compute-ward-route/`, {
                 method: 'POST',
@@ -487,6 +490,7 @@
             });
             
             const data = await response.json();
+            console.log(`Ward ${wardNumber} response:`, data);
             
             if (data.success) {
                 // Store routes
@@ -496,19 +500,27 @@
                 displayWardRoutes(ward, data.routes);
                 
                 // Update status
+                console.log(`Ward ${wardNumber} succeeded, updating status to Complete`);
                 statusBadge.className = 'badge badge-success';
                 statusBadge.textContent = 'Complete';
                 
                 computedWards++;
                 updateProgress(computedWards, wards.length, `Ward ${wardNumber} completed`);
             } else {
-                throw new Error(data.error || 'Computation failed');
+                // Handle API returning success: false
+                console.error(`Ward ${wardNumber} failed:`, data.error);
+                statusBadge.className = 'badge badge-danger';
+                statusBadge.textContent = 'Error: ' + (data.error || 'Unknown');
+                
+                computedWards++;
+                updateProgress(computedWards, wards.length, `Ward ${wardNumber} failed: ${data.error || 'Unknown error'}`);
             }
         } catch (error) {
             console.error(`Error computing ward ${wardNumber}:`, error);
             statusBadge.className = 'badge badge-danger';
-            statusBadge.textContent = 'Error';
+            statusBadge.textContent = 'Error: ' + error.message;
             
+            computedWards++;
             updateProgress(computedWards, wards.length, `Ward ${wardNumber} failed: ${error.message}`);
         }
     }
@@ -542,7 +554,7 @@
                     {
                         offset: '10%',
                         repeat: 100,
-                        symbol: L.Symbol.arrowHead({
+                        symbol: L.Symbol.ArrowHead({
                             pixelSize: 12,
                             polygon: false,
                             pathOptions: {

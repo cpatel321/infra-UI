@@ -157,8 +157,10 @@ def extract_ward_osm_data(osm_file_path: str, ward: Ward) -> str:
     Returns:
         OSM XML string for the ward
     """
+    print(f"  📂 Parsing OSM file: {osm_file_path}")
     tree = ET.parse(osm_file_path)
     root = tree.getroot()
+    print(f"  ✓ OSM file parsed successfully")
     
     # Create new OSM root
     osm_root = ET.Element('osm', version='0.6', generator='WardExtractor')
@@ -169,7 +171,9 @@ def extract_ward_osm_data(osm_file_path: str, ward: Ward) -> str:
                           maxlon=str(ward.max_lon))
     
     # First pass: collect nodes within ward boundaries
+    print(f"  🔍 Pass 1: Collecting nodes within ward boundaries...")
     ward_nodes = {}
+    total_nodes = len(root.findall('node'))
     for node in root.findall('node'):
         lat = float(node.get('lat'))
         lon = float(node.get('lon'))
@@ -179,9 +183,13 @@ def extract_ward_osm_data(osm_file_path: str, ward: Ward) -> str:
             node_id = node.get('id')
             ward_nodes[node_id] = node
     
+    print(f"  ✓ Found {len(ward_nodes)} nodes in ward (out of {total_nodes} total)")
+    
     # Second pass: collect ways that have at least one node in the ward
+    print(f"  🔍 Pass 2: Collecting ways with nodes in ward...")
     ward_ways = []
     referenced_nodes = set()
+    total_ways = len(root.findall('way'))
     
     for way in root.findall('way'):
         way_nodes = [nd.get('ref') for nd in way.findall('nd')]
@@ -193,19 +201,31 @@ def extract_ward_osm_data(osm_file_path: str, ward: Ward) -> str:
             ward_ways.append(way)
             referenced_nodes.update(way_nodes)
     
+    print(f"  ✓ Found {len(ward_ways)} ways in ward (out of {total_ways} total)")
+    print(f"  ✓ Total referenced nodes: {len(referenced_nodes)}")
+    
     # Add all referenced nodes (including those outside ward bounds but part of ways)
+    print(f"  📝 Building OSM XML for ward...")
+    nodes_added = 0
     for node in root.findall('node'):
         node_id = node.get('id')
         if node_id in referenced_nodes:
             osm_root.append(node)
+            nodes_added += 1
     
     # Add ways
     for way in ward_ways:
         osm_root.append(way)
     
-    # Convert to string
+    print(f"  ✓ OSM XML built: {nodes_added} nodes, {len(ward_ways)} ways")
+    
+    # Convert to string with unicode encoding
+    print(f"  🔄 Converting to XML string...")
     osm_tree = ET.ElementTree(osm_root)
-    return ET.tostring(osm_root, encoding='unicode')
+    xml_string = ET.tostring(osm_root, encoding='unicode')
+    print(f"  ✓ XML string created: {len(xml_string)} characters")
+    
+    return xml_string
 
 
 def calculate_ward_statistics(osm_xml_string: str, ward: Ward) -> Dict:

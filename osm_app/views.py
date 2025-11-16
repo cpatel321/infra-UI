@@ -236,7 +236,7 @@ def route_planning(request, file_id):
 
 
 def compute_routes(request, file_id):
-    """Compute optimal routes for k vehicles"""
+    """Compute optimal routes for k vehicles (single ward/normal mode)"""
     osm_record = get_object_or_404(OSMFile, id=file_id)
     
     if request.method == 'POST':
@@ -247,18 +247,25 @@ def compute_routes(request, file_id):
             if k < 1:
                 return JsonResponse({'success': False, 'error': 'Number of vehicles must be at least 1'})
             
-            # Run routing algorithm
-            partitioner = OSMRoutePartitioner(osm_record.processed_file.path)
-            routes_geojson = partitioner.compute_routes(k)
+            # Use modular function
+            result = compute_single_ward_routes(
+                osm_file_path=osm_record.processed_file.path,
+                num_vehicles=k,
+                bounds=None,  # No bounds - use entire file
+                ward_label="Full Area"
+            )
             
-            # Get statistics
-            stats = partitioner.get_statistics()
-            
-            return JsonResponse({
-                'success': True,
-                'routes': routes_geojson,
-                'stats': stats
-            })
+            if result['success']:
+                return JsonResponse({
+                    'success': True,
+                    'routes': result['routes'],
+                    'stats': result['stats']
+                })
+            else:
+                return JsonResponse({
+                    'success': False,
+                    'error': result['error']
+                })
             
         except Exception as e:
             print(f"Error computing routes: {e}")
@@ -393,8 +400,150 @@ def multiward_routing(request, file_id):
     })
 
 
+def compute_single_ward_routes(osm_file_path, num_vehicles, bounds=None, ward_label="Area"):
+    """
+    Modular function to compute routes for a single area/ward.
+    Can be called directly or via API.
+    
+    Args:
+        osm_file_path: Path to OSM file (can be full file or ward-cropped file)
+        num_vehicles: Number of vehicles to use
+        bounds: Optional dict with min_lat, max_lat, min_lon, max_lon (for cropping)
+        ward_label: Label for logging (e.g., "Ward 2" or "Main Area")
+    
+    Returns:
+        dict with success, routes (GeoJSON), computation_time, stats
+    """
+    import time
+    
+    print(f"\n{'='*80}")
+    print(f"🔄 Computing routes for {ward_label}")
+    print(f"   Vehicles: {num_vehicles}")
+    if bounds:
+        print(f"   Bounds: ({bounds['min_lat']:.6f}, {bounds['min_lon']:.6f}) to ({bounds['max_lat']:.6f}, {bounds['max_lon']:.6f})")
+    print(f"{'='*80}\n")
+    
+    try:
+        # If bounds provided, create cropped temporary file
+        working_file_path = osm_file_path
+        temp_file_created = False
+        
+        if bounds:
+            print(f"📊 Extracting area data with bounds...")
+            # Read original file and extract bounded area
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(osm_file_path)
+            root = tree.getroot()
+            
+            # Create new OSM with bounds
+            osm_root = ET.Element('osm', version='0.6', generator='WardExtractor')
+            ET.SubElement(osm_root, 'bounds',
+                         minlat=str(bounds['min_lat']),
+                         minlon=str(bounds['min_lon']),
+                         maxlat=str(bounds['max_lat']),
+                         maxlon=str(bounds['max_lon']))
+            
+            # Collect nodes in bounds
+            bounded_nodes = {}
+            for node in root.findall('node'):
+                lat = float(node.get('lat'))
+                lon = float(node.get('lon'))
+                if (bounds['min_lat'] <= lat <= bounds['max_lat'] and 
+                    bounds['min_lon'] <= lon <= bounds['max_lon']):
+                    bounded_nodes[node.get('id')] = node
+            
+            print(f"   ✓ Found {len(bounded_nodes)} nodes in bounds")
+            
+            # Collect ways with nodes in bounds
+            bounded_ways = []
+            referenced_nodes = set()
+            for way in root.findall('way'):
+                way_nodes = [nd.get('ref') for nd in way.findall('nd')]
+                if any(nd_ref in bounded_nodes for nd_ref in way_nodes):
+                    bounded_ways.append(way)
+                    referenced_nodes.update(way_nodes)
+            
+            print(f"   ✓ Found {len(bounded_ways)} ways in bounds")
+            
+            if not bounded_ways:
+                return {
+                    'success': False,
+                    'error': f'{ward_label} has no roads in the selected area',
+                    'routes': None,
+                    'computation_time': 0,
+                    'stats': {}
+                }
+            
+            # Add all referenced nodes and ways
+            for node in root.findall('node'):
+                if node.get('id') in referenced_nodes:
+                    osm_root.append(node)
+            for way in bounded_ways:
+                osm_root.append(way)
+            
+            # Create temporary file
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.osm', delete=False, encoding='utf-8') as tmp_file:
+                tmp_file.write(ET.tostring(osm_root, encoding='unicode'))
+                working_file_path = tmp_file.name
+                temp_file_created = True
+            print(f"   ✓ Created temporary bounded file")
+        
+        # Run routing algorithm
+        start_time = time.time()
+        
+        print(f"🚗 Initializing route partitioner...")
+        partitioner = OSMRoutePartitioner(working_file_path)
+        
+        print(f"🗺️  Computing routes for {num_vehicles} vehicle(s)...")
+        routes_geojson = partitioner.compute_routes(num_vehicles)
+        
+        computation_time = time.time() - start_time
+        
+        # Get statistics
+        stats = partitioner.get_statistics()
+        
+        print(f"✓ Routes computed successfully!")
+        print(f"   Computation time: {computation_time:.2f} seconds")
+        print(f"   Routes generated: {len(routes_geojson.get('features', []))} routes")
+        print(f"{'='*80}\n")
+        
+        # Cleanup temporary file if created
+        if temp_file_created and os.path.exists(working_file_path):
+            os.unlink(working_file_path)
+        
+        return {
+            'success': True,
+            'routes': routes_geojson,
+            'computation_time': computation_time,
+            'stats': stats
+        }
+        
+    except Exception as e:
+        print(f"\n{'='*80}")
+        print(f"❌ ERROR in {ward_label}")
+        print(f"   Error type: {type(e).__name__}")
+        print(f"   Error message: {str(e)}")
+        print(f"{'='*80}")
+        import traceback
+        traceback.print_exc()
+        print(f"{'='*80}\n")
+        
+        # Cleanup on error
+        if temp_file_created and 'working_file_path' in locals() and os.path.exists(working_file_path):
+            os.unlink(working_file_path)
+        
+        return {
+            'success': False,
+            'error': str(e),
+            'routes': None,
+            'computation_time': 0,
+            'stats': {}
+        }
+
+
 def compute_ward_route(request, file_id):
-    """Compute optimal routes for a specific ward"""
+    """API endpoint to compute routes for a specific ward"""
     osm_record = get_object_or_404(OSMFile, id=file_id)
     
     if request.method == 'POST':
@@ -405,44 +554,49 @@ def compute_ward_route(request, file_id):
             
             ward = get_object_or_404(Ward, id=ward_id)
             
-            # Extract OSM data for this ward
-            ward_osm_xml = extract_ward_osm_data(osm_record.processed_file.path, ward)
+            # Use modular function to compute routes
+            bounds = {
+                'min_lat': ward.min_lat,
+                'max_lat': ward.max_lat,
+                'min_lon': ward.min_lon,
+                'max_lon': ward.max_lon
+            }
             
-            # Create temporary file for ward OSM data
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.osm', delete=False) as tmp_file:
-                tmp_file.write(ward_osm_xml)
-                tmp_file_path = tmp_file.name
+            result = compute_single_ward_routes(
+                osm_file_path=osm_record.processed_file.path,
+                num_vehicles=num_vehicles,
+                bounds=bounds,
+                ward_label=f"Ward {ward.ward_number}"
+            )
             
-            try:
-                # Run routing algorithm on ward
-                import time
-                start_time = time.time()
-                
-                partitioner = OSMRoutePartitioner(tmp_file_path)
-                routes_geojson = partitioner.compute_routes(num_vehicles)
-                
-                computation_time = time.time() - start_time
-                
+            if result['success']:
                 # Update ward with results
                 ward.num_vehicles = num_vehicles
-                ward.routes_geojson = routes_geojson
-                ward.computation_time = computation_time
+                ward.routes_geojson = result['routes']
+                ward.computation_time = result['computation_time']
                 ward.computed_at = timezone.now()
+                
+                # Update statistics
+                if result['stats']:
+                    ward.total_nodes = result['stats'].get('total_nodes', 0)
+                    ward.total_roads = result['stats'].get('total_roads', 0)
+                    ward.total_length_m = result['stats'].get('total_length_m', 0)
+                
                 ward.save()
                 
                 return JsonResponse({
                     'success': True,
-                    'routes': routes_geojson,
-                    'computation_time': computation_time
+                    'routes': result['routes'],
+                    'computation_time': result['computation_time']
                 })
-                
-            finally:
-                # Clean up temporary file
-                if os.path.exists(tmp_file_path):
-                    os.unlink(tmp_file_path)
+            else:
+                return JsonResponse({
+                    'success': False,
+                    'error': result['error']
+                })
             
         except Exception as e:
-            print(f"Error computing ward route: {e}")
+            print(f"❌ API Error: {str(e)}")
             import traceback
             traceback.print_exc()
             return JsonResponse({'success': False, 'error': str(e)})

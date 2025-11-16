@@ -29,8 +29,11 @@ class OSMRoutePartitioner:
         self.nodes = {}  # node_id -> (lat, lon)
         self.ways = []   # list of ways as list of node ids
         self.G = None    # NetworkX graph
+        self.Gc = None   # Connected component graph
         self.depot = None
         self.centroid = None
+        self.depot_lat = None
+        self.depot_lon = None
         
     def parse_osm(self):
         """Parse OSM XML file and extract nodes and ways."""
@@ -110,6 +113,8 @@ class OSMRoutePartitioner:
         
         self.depot = best_node
         self.centroid = (c_lat, c_lon)
+        self.depot_lat = c_lat  # For easier access
+        self.depot_lon = c_lon  # For easier access
         print(f"Centroid: ({c_lat:.6f}, {c_lon:.6f}), Depot node: {best_node}")
         
     def get_connected_component(self):
@@ -120,13 +125,14 @@ class OSMRoutePartitioner:
         # Find component containing depot
         for comp in nx.connected_components(self.G):
             if self.depot in comp:
-                self.G = self.G.subgraph(comp).copy()
+                self.Gc = self.G.subgraph(comp).copy()
+                self.G = self.Gc  # Keep reference for backward compatibility
                 
                 # Update self.nodes to only contain nodes in the connected component
-                component_nodes = set(self.G.nodes())
+                component_nodes = set(self.Gc.nodes())
                 self.nodes = {nid: coords for nid, coords in self.nodes.items() if nid in component_nodes}
                 
-                print(f"Using connected component with {self.G.number_of_nodes()} nodes")
+                print(f"Using connected component with {self.Gc.number_of_nodes()} nodes")
                 return
         
         raise ValueError("Depot not in any connected component")
@@ -341,38 +347,61 @@ class OSMRoutePartitioner:
         
     def compute_routes(self, k):
         """Main function to compute k vehicle routes."""
-        print(f"\n=== Computing routes for {k} vehicles ===")
+        print(f"\n{'='*60}")
+        print(f"🚗 ROUTE COMPUTATION STARTED")
+        print(f"   Vehicles requested: {k}")
+        print(f"{'='*60}")
         
         # Parse and build graph
+        print(f"📖 Step 1: Parsing OSM data...")
         self.parse_osm()
+        print(f"   ✓ Nodes: {len(self.nodes)}, Ways: {len(self.ways)}")
+        
+        print(f"🔨 Step 2: Building graph...")
         self.build_graph()
+        print(f"   ✓ Graph nodes: {self.G.number_of_nodes()}, edges: {self.G.number_of_edges()}")
         
         # Find depot
+        print(f"📍 Step 3: Finding centroid depot...")
         self.find_centroid_depot()
+        print(f"   ✓ Depot at: ({self.depot_lat:.6f}, {self.depot_lon:.6f})")
         
         # Work with largest connected component
+        print(f"🔗 Step 4: Extracting connected component...")
         self.get_connected_component()
+        print(f"   ✓ Component nodes: {self.Gc.number_of_nodes()}, edges: {self.Gc.number_of_edges()}")
         
         # Make Eulerian
+        print(f"⚡ Step 5: Making graph Eulerian...")
         MG, pairs = self.make_eulerian()
+        print(f"   ✓ Eulerian graph edges: {MG.number_of_edges()}")
+        print(f"   ✓ Added {len(pairs)} edge pairs to balance odd-degree nodes")
         
         # Extract Eulerian circuit
-        print("Extracting Eulerian circuit...")
+        print(f"🔄 Step 6: Extracting Eulerian circuit...")
         circuit_edges = self.eulerian_circuit_edges(MG)
-        print(f"Circuit has {len(circuit_edges)} edges")
+        print(f"   ✓ Circuit contains {len(circuit_edges)} edges")
         
         # Split into k segments
-        print(f"Splitting into {k} segments...")
+        print(f"✂️  Step 7: Splitting circuit into {k} segments...")
         segments = self.split_circuit_into_k(circuit_edges, k)
+        print(f"   ✓ Segments created: {len(segments)}")
+        for i, seg in enumerate(segments, 1):
+            print(f"      Vehicle {i}: {len(seg)} edges")
         
         # Build routes
-        print("Building vehicle routes...")
+        print(f"🗺️  Step 8: Building vehicle routes...")
         features = []
         for vid, seg in enumerate(segments, start=1):
+            print(f"   Building route for Vehicle {vid}...")
             node_seq = self.build_vehicle_route(seg)
             route_feature = self.nodes_to_geojson_route(node_seq, vid)
             features.append(route_feature)
-            print(f"Vehicle {vid}: {len(node_seq)} nodes, {route_feature['properties']['length_m']:.2f} m")
+            print(f"   ✓ Vehicle {vid}: {len(node_seq)} nodes, {route_feature['properties']['length_m']:.2f} m")
+        
+        print(f"\n✅ ROUTE COMPUTATION COMPLETED")
+        print(f"   Total routes: {len(features)}")
+        print(f"{'='*60}\n")
         
         geojson_data = {
             'type': 'FeatureCollection',
