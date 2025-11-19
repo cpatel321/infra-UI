@@ -1,0 +1,445 @@
+{% extends 'base.html' %}
+
+{% block title %}Route Planning Configuration - OSM Processor{% endblock %}
+
+{% block extra_css %}
+<style>
+    .config-card {
+        border: 2px solid #e0e0e0;
+        border-radius: 12px;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        height: 100%;
+    }
+    
+    .config-card:hover {
+        border-color: #6366f1;
+        box-shadow: 0 8px 20px rgba(99, 102, 241, 0.15);
+        transform: translateY(-4px);
+    }
+    
+    .config-card.selected {
+        border-color: #6366f1;
+        background-color: #f0f4ff;
+        box-shadow: 0 8px 20px rgba(99, 102, 241, 0.25);
+    }
+    
+    .config-icon {
+        font-size: 64px;
+        margin-bottom: 20px;
+        color: #6366f1;
+    }
+    
+    .config-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
+    
+    .config-description {
+        color: #666;
+        margin-bottom: 15px;
+    }
+    
+    .config-features {
+        text-align: left;
+        padding-left: 20px;
+    }
+    
+    .config-features li {
+        margin-bottom: 8px;
+        color: #555;
+    }
+    
+    .ward-config-section {
+        display: none;
+        margin-top: 30px;
+    }
+    
+    .ward-config-section.active {
+        display: block;
+    }
+    
+    .stats-preview {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 20px;
+        margin-top: 20px;
+    }
+    
+    .stat-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid #e0e0e0;
+    }
+    
+    .stat-item:last-child {
+        border-bottom: none;
+    }
+    
+    .stat-label {
+        font-weight: 500;
+        color: #666;
+    }
+    
+    .stat-value {
+        font-weight: 600;
+        color: #333;
+        font-size: 1.1em;
+    }
+    
+    .info-box {
+        background: #e3f2fd;
+        border-left: 4px solid #2196f3;
+        padding: 15px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+    }
+    
+    .warning-box {
+        background: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 15px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+    }
+    
+    .grid-preview {
+        margin-top: 20px;
+        padding: 15px;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+    }
+    
+    .proceed-btn {
+        margin-top: 30px;
+        padding: 12px 40px;
+        font-size: 1.1em;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">🗺️ Route Planning Configuration</h4>
+                </div>
+                <div class="card-body">
+                    <p class="mb-0"><strong>Area:</strong> {{ osm_file.file_name }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="info-box">
+                <strong>Choose Your Routing Approach:</strong> For large areas, multi-ward routing significantly reduces computation time by processing smaller sections in parallel.
+            </div>
+        </div>
+    </div>
+
+    <!-- Routing Approach Selection -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="config-card text-center p-4" id="singleWardCard" onclick="selectApproach('single')">
+                <div class="config-icon">✖️</div>
+                <div class="config-title">Single Ward (Normal)</div>
+                <div class="config-description">Process the entire area as one unit. Best for small to medium areas.</div>
+                <ul class="config-features">
+                    <li>✓ Simple configuration</li>
+                    <li>✓ Single centroid/depot</li>
+                    <li>✓ Faster for areas < 5 km²</li>
+                </ul>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="config-card text-center p-4" id="multiWardCard" onclick="selectApproach('multi')">
+                <div class="config-icon">🔲</div>
+                <div class="config-title">Multi-Ward</div>
+                <div class="config-description">Divide area into wards for parallel processing. Best for large areas.</div>
+                <ul class="config-features">
+                    <li>✓ Faster computation</li>
+                    <li>✓ Per-ward optimization</li>
+                    <li>✓ Best for areas > 5 km²</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Ward Configuration Section -->
+    <div class="ward-config-section" id="multiWardConfig">
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="mb-0">📐 Ward Configuration</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label for="numWards"><strong>Number of Wards:</strong></label>
+                            <input type="number" class="form-control" id="numWards" min="2" max="100" value="4" 
+                                   oninput="calculateWardStats()">
+                            <small class="form-text text-muted">
+                                Recommended: 4-9 wards for optimal performance
+                            </small>
+                        </div>
+
+                        <div class="form-group mt-3">
+                            <label for="wardLayout"><strong>Ward Layout:</strong></label>
+                            <select class="form-control" id="wardLayout" onchange="calculateWardStats()">
+                                <option value="auto_grid" selected>Auto (Square Grid)</option>
+                            </select>
+                            <small class="form-text text-muted">
+                                How to divide the area into wards
+                            </small>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <h6 class="mb-3">🚛 Vehicle & Waste Parameters</h6>
+
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="useWorldPop" checked>
+                            <label class="form-check-label" for="useWorldPop">
+                                <strong>Use WorldPop Population Data</strong>
+                                <small class="d-block text-muted">Automatically fetch population from satellite imagery for capacity-based vehicle calculation</small>
+                            </label>
+                        </div>
+
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="useGraphPartitioning" checked>
+                            <label class="form-check-label" for="useGraphPartitioning">
+                                <strong>🎯 Use Advanced Graph Partitioning</strong>
+                                <small class="d-block text-muted">Divides wards based on road network topology - roads stay intact within wards, natural boundaries respected. Requires WorldPop data.</small>
+                            </label>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="wastePerCapita"><strong>Waste per Capita (kg/day):</strong></label>
+                                    <input type="number" class="form-control" id="wastePerCapita" value="0.5" step="0.1" min="0.1" max="5">
+                                    <small class="form-text text-muted">India average: 0.5 kg/person/day</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="vehicleCapacity"><strong>Vehicle Capacity (kg):</strong></label>
+                                    <input type="number" class="form-control" id="vehicleCapacity" value="1000" step="50" min="100" max="5000">
+                                    <small class="form-text text-muted">Typical: 1000-3000 kg</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid-preview" id="gridPreview">
+                            <strong>Grid Layout Preview:</strong>
+                            <p class="mb-0 mt-2" id="gridLayoutText">Calculating...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">⚡ Area Statistics Preview</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="stats-preview">
+                            <div class="stat-item">
+                                <span class="stat-label">Total Area:</span>
+                                <span class="stat-value" id="totalArea">{{ total_area_km2|floatformat:2 }} km²</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Area per Ward:</span>
+                                <span class="stat-value" id="areaPerWard">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Ward Dimensions:</span>
+                                <span class="stat-value" id="wardDimensions">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Grid Layout:</span>
+                                <span class="stat-value" id="gridLayout">-</span>
+                            </div>
+                        </div>
+
+                        <div class="alert alert-success mt-3" id="readyMessage" style="display: none;">
+                            <strong>✓ Ready to proceed!</strong><br>
+                            Each ward will be processed independently with its own centroid and vehicle assignment.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Proceed Buttons -->
+    <div class="row">
+        <div class="col-12 text-center">
+            <button class="btn btn-primary btn-lg proceed-btn" id="proceedBtn" onclick="proceedToRouting()" disabled>
+                <i class="fas fa-arrow-right"></i> Proceed to Route Planning →
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let selectedApproach = null;
+    const osmFileId = {{ osm_file.id }};
+    const totalAreaKm2 = {{ total_area_km2 }};
+    const minLat = {{ osm_file.min_lat }};
+    const maxLat = {{ osm_file.max_lat }};
+    const minLon = {{ osm_file.min_lon }};
+    const maxLon = {{ osm_file.max_lon }};
+
+    function selectApproach(approach) {
+        selectedApproach = approach;
+        
+        // Update card styling
+        document.getElementById('singleWardCard').classList.remove('selected');
+        document.getElementById('multiWardCard').classList.remove('selected');
+        
+        if (approach === 'single') {
+            document.getElementById('singleWardCard').classList.add('selected');
+            document.getElementById('multiWardConfig').classList.remove('active');
+            document.getElementById('proceedBtn').disabled = false;
+        } else {
+            document.getElementById('multiWardCard').classList.add('selected');
+            document.getElementById('multiWardConfig').classList.add('active');
+            calculateWardStats();
+        }
+    }
+
+    function calculateWardStats() {
+        const numWards = parseInt(document.getElementById('numWards').value);
+        
+        if (isNaN(numWards) || numWards < 2) {
+            document.getElementById('proceedBtn').disabled = true;
+            return;
+        }
+
+        // Calculate area per ward
+        const areaPerWard = totalAreaKm2 / numWards;
+        
+        // Calculate optimal grid layout (closest to square)
+        const cols = Math.ceil(Math.sqrt(numWards));
+        const rows = Math.ceil(numWards / cols);
+        
+        // Calculate approximate dimensions
+        const latRange = maxLat - minLat;
+        const lonRange = maxLon - minLon;
+        
+        // Approximate km per degree (rough estimate)
+        const kmPerLatDegree = 111.32;
+        const kmPerLonDegree = 111.32 * Math.cos((minLat + maxLat) / 2 * Math.PI / 180);
+        
+        const totalWidthKm = lonRange * kmPerLonDegree;
+        const totalHeightKm = latRange * kmPerLatDegree;
+        
+        const wardWidthKm = totalWidthKm / cols;
+        const wardHeightKm = totalHeightKm / rows;
+        
+        // Update UI
+        document.getElementById('areaPerWard').textContent = areaPerWard.toFixed(2) + ' km²';
+        document.getElementById('wardDimensions').textContent = 
+            `${wardWidthKm.toFixed(2)} × ${wardHeightKm.toFixed(2)} km`;
+        document.getElementById('gridLayout').textContent = `${rows} rows × ${cols} columns`;
+        document.getElementById('gridLayoutText').textContent = 
+            `Area will be divided into a ${rows} × ${cols} grid (${numWards} wards total)`;
+        
+        document.getElementById('readyMessage').style.display = 'block';
+        document.getElementById('proceedBtn').disabled = false;
+    }
+
+    function proceedToRouting() {
+        if (!selectedApproach) {
+            alert('Please select a routing approach first.');
+            return;
+        }
+
+        if (selectedApproach === 'single') {
+            // Go to existing single ward route planning
+            window.location.href = `/route-planning/${osmFileId}/`;
+        } else {
+            // Create ward configuration and go to multi-ward route planning
+            const numWards = parseInt(document.getElementById('numWards').value);
+            const wardLayout = document.getElementById('wardLayout').value;
+            const useWorldPop = document.getElementById('useWorldPop').checked;
+            const wastePerCapita = parseFloat(document.getElementById('wastePerCapita').value);
+            const vehicleCapacity = parseFloat(document.getElementById('vehicleCapacity').value);
+            
+            // Show loading
+            document.getElementById('proceedBtn').disabled = true;
+            document.getElementById('proceedBtn').innerHTML = 
+                '<span class="spinner-border spinner-border-sm mr-2"></span> Creating wards & fetching population data...';
+            
+            // Create ward configuration via AJAX
+            const useGraphPartitioning = document.getElementById('useGraphPartitioning').checked;
+            
+            fetch(`/${osmFileId}/create-ward-config/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    num_wards: numWards,
+                    ward_layout: wardLayout,
+                    use_worldpop: useWorldPop,
+                    use_graph_partitioning: useGraphPartitioning,
+                    waste_per_capita: wastePerCapita,
+                    vehicle_capacity: vehicleCapacity
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Redirect to multi-ward routing page with config ID
+                    window.location.href = `/${osmFileId}/multiward-routing/?config_id=${data.config_id}`;
+                } else {
+                    alert('Error creating ward configuration: ' + data.error);
+                    document.getElementById('proceedBtn').disabled = false;
+                    document.getElementById('proceedBtn').innerHTML = 
+                        '<i class="fas fa-arrow-right"></i> Proceed to Route Planning →';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error creating ward configuration. Please try again.');
+                document.getElementById('proceedBtn').disabled = false;
+                document.getElementById('proceedBtn').innerHTML = 
+                    '<i class="fas fa-arrow-right"></i> Proceed to Route Planning →';
+            });
+        }
+    }
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    // Initialize with single ward selected if recommended
+    window.addEventListener('DOMContentLoaded', function() {
+        if (totalAreaKm2 < 5) {
+            selectApproach('single');
+        }
+    });
+</script>
+{% endblock %}

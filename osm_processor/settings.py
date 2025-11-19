@@ -124,3 +124,14 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # File upload settings
 FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50 MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50 MB
+
+# GIS Data Configuration
+GIS_DATA_DIR = BASE_DIR / 'gis_data'
+POPULATION_RASTER_PATH = GIS_DATA_DIR / 'population' / 'ind_ppp_2020.tif'
+
+# Validate on startup
+if not POPULATION_RASTER_PATH.exists():
+    print(f"⚠️  WARNING: Population raster not found at {POPULATION_RASTER_PATH}")
+    print(f"   Population estimation will not work. Please add the file.")
+else:
+    print(f"✅ Population raster found: {POPULATION_RASTER_PATH}")
