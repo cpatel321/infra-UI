@@ -3,3 +3,4 @@ venv/
 .osm
 *.osm
 *.sqlite3
+*.tif
