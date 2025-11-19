@@ -5,6 +5,7 @@ app_name = 'osm_app'
 
 urlpatterns = [
     path('', views.index, name='index'),
+    path('use-default-map/', views.use_default_map, name='use_default_map'),
     path('upload/', views.upload_file, name='upload_file'),
     path('process/<int:file_id>/', views.process_file, name='process_file'),
     path('crop/<int:file_id>/', views.crop_file, name='crop_file'),

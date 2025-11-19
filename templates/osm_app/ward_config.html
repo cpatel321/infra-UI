@@ -200,6 +200,43 @@
                             </small>
                         </div>
 
+                        <hr class="my-4">
+
+                        <h6 class="mb-3">🚛 Vehicle & Waste Parameters</h6>
+
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="useWorldPop" checked>
+                            <label class="form-check-label" for="useWorldPop">
+                                <strong>Use WorldPop Population Data</strong>
+                                <small class="d-block text-muted">Automatically fetch population from satellite imagery for capacity-based vehicle calculation</small>
+                            </label>
+                        </div>
+
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="useGraphPartitioning" checked>
+                            <label class="form-check-label" for="useGraphPartitioning">
+                                <strong>🎯 Use Advanced Graph Partitioning</strong>
+                                <small class="d-block text-muted">Divides wards based on road network topology - roads stay intact within wards, natural boundaries respected. Requires WorldPop data.</small>
+                            </label>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="wastePerCapita"><strong>Waste per Capita (kg/day):</strong></label>
+                                    <input type="number" class="form-control" id="wastePerCapita" value="0.5" step="0.1" min="0.1" max="5">
+                                    <small class="form-text text-muted">India average: 0.5 kg/person/day</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="vehicleCapacity"><strong>Vehicle Capacity (kg):</strong></label>
+                                    <input type="number" class="form-control" id="vehicleCapacity" value="1000" step="50" min="100" max="5000">
+                                    <small class="form-text text-muted">Typical: 1000-3000 kg</small>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="grid-preview" id="gridPreview">
                             <strong>Grid Layout Preview:</strong>
                             <p class="mb-0 mt-2" id="gridLayoutText">Calculating...</p>
@@ -334,13 +371,18 @@
             // Create ward configuration and go to multi-ward route planning
             const numWards = parseInt(document.getElementById('numWards').value);
             const wardLayout = document.getElementById('wardLayout').value;
+            const useWorldPop = document.getElementById('useWorldPop').checked;
+            const wastePerCapita = parseFloat(document.getElementById('wastePerCapita').value);
+            const vehicleCapacity = parseFloat(document.getElementById('vehicleCapacity').value);
             
             // Show loading
             document.getElementById('proceedBtn').disabled = true;
             document.getElementById('proceedBtn').innerHTML = 
-                '<span class="spinner-border spinner-border-sm mr-2"></span> Creating wards...';
+                '<span class="spinner-border spinner-border-sm mr-2"></span> Creating wards & fetching population data...';
             
             // Create ward configuration via AJAX
+            const useGraphPartitioning = document.getElementById('useGraphPartitioning').checked;
+            
             fetch(`/${osmFileId}/create-ward-config/`, {
                 method: 'POST',
                 headers: {
@@ -349,7 +391,11 @@
                 },
                 body: JSON.stringify({
                     num_wards: numWards,
-                    ward_layout: wardLayout
+                    ward_layout: wardLayout,
+                    use_worldpop: useWorldPop,
+                    use_graph_partitioning: useGraphPartitioning,
+                    waste_per_capita: wastePerCapita,
+                    vehicle_capacity: vehicleCapacity
                 })
             })
             .then(response => response.json())

@@ -7,16 +7,90 @@ from django.core.files.base import ContentFile
 from .models import OSMFile, ComputationLog, WardConfiguration, Ward
 from .osm_utils import OSMProcessor
 from .routing_utils import OSMRoutePartitioner
-from .ward_utils import divide_area_into_wards, extract_ward_osm_data, calculate_ward_statistics, calculate_area_km2
+from .ward_utils import (
+    divide_area_into_wards, 
+    divide_by_graph_partitioning,
+    extract_ward_osm_data, 
+    calculate_ward_statistics, 
+    calculate_area_km2,
+    validate_ward_before_routing,
+    check_ward_connectivity,
+    assign_wards_to_nearest_depot
+)
 import os
 import json
 import tempfile
+import shutil
+from django.conf import settings
 
 
 def index(request):
     """Main page showing upload form and file list"""
     files = OSMFile.objects.all()
     return render(request, 'osm_app/index.html', {'files': files})
+
+
+def use_default_map(request):
+    """Load the default Kanpur map and process it"""
+    try:
+        # Path to default map
+        default_map_path = os.path.join(settings.BASE_DIR, 'gis_data', 'population', 'default_map.osm')
+        
+        if not os.path.exists(default_map_path):
+            messages.error(request, 'Default Kanpur map not found. Please upload a custom file.')
+            return redirect('osm_app:index')
+        
+        # Create a database record
+        osm_record = OSMFile.objects.create(
+            file_name='Kanpur_Full_Map.osm',
+            status='processing'
+        )
+        
+        # Copy default file to media directory
+        destination = os.path.join(settings.MEDIA_ROOT, 'osm_files', f'kanpur_full_{osm_record.id}.osm')
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.copy2(default_map_path, destination)
+        
+        # Update the record with file path
+        osm_record.original_file.name = f'osm_files/kanpur_full_{osm_record.id}.osm'
+        osm_record.save()
+        
+        # Process the file
+        processor = OSMProcessor(destination)
+        
+        if not processor.parse():
+            raise Exception("Failed to parse default OSM file")
+        
+        # Filter to roads only
+        processor.filter_roads_only()
+        
+        # Get bounds for later use
+        bounds = processor.get_bounds()
+        if bounds:
+            osm_record.min_lat = bounds['min_lat']
+            osm_record.max_lat = bounds['max_lat']
+            osm_record.min_lon = bounds['min_lon']
+            osm_record.max_lon = bounds['max_lon']
+        
+        # Save processed file
+        processed_path = os.path.join(settings.MEDIA_ROOT, 'osm_files', f'kanpur_processed_{osm_record.id}.osm')
+        os.makedirs(os.path.dirname(processed_path), exist_ok=True)
+        processor.save(processed_path)
+        
+        osm_record.processed_file.name = f'osm_files/kanpur_processed_{osm_record.id}.osm'
+        osm_record.status = 'processed'
+        osm_record.processed_at = timezone.now()
+        
+        osm_record.save()
+        
+        messages.success(request, 'Default Kanpur map loaded successfully! Now crop to your area of interest.')
+        return redirect('osm_app:crop_file', file_id=osm_record.id)
+        
+    except Exception as e:
+        messages.error(request, f'Error loading default map: {str(e)}')
+        if 'osm_record' in locals():
+            osm_record.delete()
+        return redirect('osm_app:index')
 
 
 def upload_file(request):
@@ -112,30 +186,67 @@ def crop_file(request, file_id):
             min_lon = float(data.get('min_lon'))
             max_lon = float(data.get('max_lon'))
             
+            print(f"\n📍 Cropping to bbox: ({min_lat}, {min_lon}) to ({max_lat}, {max_lon})")
+            
             # Process with new bounding box
             processor = OSMProcessor(osm_record.processed_file.path)
             
             if not processor.parse():
                 raise Exception("Failed to parse processed file")
             
+            # Count nodes and ways before cropping
+            nodes_before = len(processor.root.findall('node'))
+            ways_before = len(processor.root.findall('way'))
+            print(f"   Before crop: {nodes_before} nodes, {ways_before} ways")
+            
             processor.crop_to_bbox(min_lat, max_lat, min_lon, max_lon)
             
-            # Save cropped file
-            output_filename = f"cropped_{osm_record.file_name}"
-            output_path = os.path.join(
-                os.path.dirname(osm_record.processed_file.path),
-                output_filename
-            )
+            # Count nodes and ways after cropping
+            nodes_after = len(processor.root.findall('node'))
+            ways_after = len(processor.root.findall('way'))
+            print(f"   After crop: {nodes_after} nodes, {ways_after} ways")
             
+            # Save cropped file - determine correct path
+            base_filename = os.path.basename(osm_record.file_name)
+            output_filename = f"cropped_{base_filename}"
+            
+            # Save in the same directory structure as the processed file
+            if osm_record.processed_file:
+                processed_dir = os.path.dirname(osm_record.processed_file.path)
+                output_path = os.path.join(processed_dir, output_filename)
+                
+                # Get relative path for database storage
+                media_root = os.path.join(settings.MEDIA_ROOT, 'osm_files')
+                if processed_dir.startswith(media_root):
+                    relative_dir = os.path.relpath(processed_dir, media_root)
+                    if relative_dir == '.':
+                        db_path = f'osm_files/{output_filename}'
+                    else:
+                        db_path = f'osm_files/{relative_dir}/{output_filename}'
+                else:
+                    db_path = f'osm_files/{output_filename}'
+            else:
+                # Fallback: save to osm_files root
+                output_path = os.path.join(settings.MEDIA_ROOT, 'osm_files', output_filename)
+                db_path = f'osm_files/{output_filename}'
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            print(f"   Saving to: {output_path}")
             processor.save(output_path)
+            print(f"   File saved successfully")
             
             # Update record
-            osm_record.processed_file.name = f'osm_files/processed/{output_filename}'
+            osm_record.processed_file.name = db_path
             osm_record.min_lat = min_lat
             osm_record.max_lat = max_lat
             osm_record.min_lon = min_lon
             osm_record.max_lon = max_lon
             osm_record.save()
+            
+            print(f"   Database updated: {db_path}")
+            print(f"   ✅ Crop completed successfully\n")
             
             return JsonResponse({'success': True, 'message': 'File cropped successfully!'})
             
@@ -324,6 +435,9 @@ def ward_config(request, file_id):
 
 def create_ward_config(request, file_id):
     """Create ward configuration and divide area into wards"""
+    from django.conf import settings
+    from .gis_utils import get_population_from_worldpop, validate_raster_coverage
+    
     osm_record = get_object_or_404(OSMFile, id=file_id)
     
     if request.method == 'POST':
@@ -332,26 +446,153 @@ def create_ward_config(request, file_id):
             num_wards = int(data.get('num_wards', 4))
             ward_layout = data.get('ward_layout', 'auto_grid')
             
+            # Get waste parameters
+            use_worldpop = data.get('use_worldpop', True)
+            waste_per_capita = float(data.get('waste_per_capita', 0.5))
+            vehicle_capacity = float(data.get('vehicle_capacity', 1000.0))
+            
+            print(f"\n{'='*80}")
+            print(f"Ward Configuration Request:")
+            print(f"  Num Wards: {num_wards}")
+            print(f"  Use WorldPop: {use_worldpop}")
+            print(f"  Waste per Capita: {waste_per_capita} kg/day")
+            print(f"  Vehicle Capacity: {vehicle_capacity} kg")
+            print(f"{'='*80}\n")
+            
             if num_wards < 2 or num_wards > 100:
                 return JsonResponse({'success': False, 'error': 'Number of wards must be between 2 and 100'})
             
-            # Create ward configuration
-            config = divide_area_into_wards(osm_record, num_wards, ward_layout)
+            # Check if WorldPop raster is available
+            raster_available = False
+            if use_worldpop:
+                print(f"📂 Checking WorldPop raster...")
+                print(f"   Path: {settings.POPULATION_RASTER_PATH}")
+                print(f"   Exists: {settings.POPULATION_RASTER_PATH.exists()}")
+                
+                if settings.POPULATION_RASTER_PATH.exists():
+                    bounds = {
+                        'min_lat': osm_record.min_lat,
+                        'max_lat': osm_record.max_lat,
+                        'min_lon': osm_record.min_lon,
+                        'max_lon': osm_record.max_lon
+                    }
+                    print(f"   OSM File Bounds: {bounds}")
+                    coverage = validate_raster_coverage(bounds, str(settings.POPULATION_RASTER_PATH))
+                    print(f"   Coverage Check: {coverage}")
+                    raster_available = coverage['covered']
+                    if not raster_available:
+                        print(f"   ⚠️  Area outside raster coverage: {coverage['message']}")
+                    else:
+                        print(f"   ✅ Area is covered by raster")
+                else:
+                    print(f"   ❌ Raster file not found!")
+            else:
+                print(f"⚠️  WorldPop disabled by user")
             
-            # Calculate statistics for each ward
+            # Create ward configuration
+            # Use graph partitioning if available, otherwise population-balanced or grid
+            use_graph_partitioning = data.get('use_graph_partitioning', False)
+            
+            if use_graph_partitioning and raster_available:
+                print(f"\n🎯 Using GRAPH PARTITIONING ward division (Advanced)")
+                print(f"   (Respects road network topology, no split roads)")
+                try:
+                    config = divide_by_graph_partitioning(
+                        osm_record, 
+                        num_wards, 
+                        str(settings.POPULATION_RASTER_PATH)
+                    )
+                except Exception as e:
+                    print(f"   ⚠️  Graph partitioning failed: {e}")
+                    print(f"   📐 Falling back to grid-based division")
+                    config = divide_area_into_wards(osm_record, num_wards, ward_layout)
+            else:
+                print(f"\n📐 Using GRID-BASED ward division")
+                print(f"   (Creates equal geographic area per ward)")
+                config = divide_area_into_wards(osm_record, num_wards, ward_layout)
+            
+            wards_data = []
+            
+            # Calculate statistics and population for each ward
             for ward in config.wards.all():
                 try:
+                    # Set waste parameters
+                    ward.waste_per_capita_kg = waste_per_capita
+                    ward.vehicle_capacity_kg = vehicle_capacity
+                    
                     # Extract OSM data for this ward
                     ward_osm_xml = extract_ward_osm_data(osm_record.processed_file.path, ward)
                     
                     # Calculate statistics
                     calculate_ward_statistics(ward_osm_xml, ward)
+                    
+                    # Validate ward data quality
+                    print(f"   🔍 Validating ward {ward.ward_number}...")
+                    validation_result = validate_ward_before_routing(ward)
+                    if validation_result['warnings']:
+                        for warning in validation_result['warnings']:
+                            print(f"      ⚠️  {warning}")
+                    
+                    # Check connectivity
+                    connectivity_result = check_ward_connectivity(ward_osm_xml, ward)
+                    if not connectivity_result['connected']:
+                        print(f"      ⚠️  {connectivity_result['message']}")
+                    
+                    # Get population from WorldPop if available
+                    if raster_available:
+                        print(f"   📍 Fetching population from WorldPop for Ward {ward.ward_number}...")
+                        ward_bounds = {
+                            'min_lat': ward.min_lat,
+                            'max_lat': ward.max_lat,
+                            'min_lon': ward.min_lon,
+                            'max_lon': ward.max_lon
+                        }
+                        print(f"      Ward bounds: {ward_bounds}")
+                        population = get_population_from_worldpop(
+                            ward_bounds,
+                            str(settings.POPULATION_RASTER_PATH)
+                        )
+                        print(f"      Raw population result: {population}")
+                        ward.population = population
+                        ward.population_source = 'worldpop'
+                        ward.population_density_per_km2 = population / ward.area_km2 if ward.area_km2 > 0 else 0
+                        ward.save()
+                        print(f"   ✅ Population: {population:,} people (Density: {ward.population_density_per_km2:.0f}/km²)")
+                    else:
+                        ward.population = 0
+                        ward.population_source = 'manual'
+                        ward.save()
+                        print(f"   ⚠️  WorldPop not available, population set to 0 (raster_available={raster_available})")
+                    
+                    wards_data.append({
+                        'ward_number': ward.ward_number,
+                        'population': ward.population,
+                        'area_km2': ward.area_km2,
+                        'density': ward.population_density_per_km2,
+                        'roads': ward.total_roads,
+                        'length_m': ward.total_length_m
+                    })
+                    
                 except Exception as e:
-                    print(f"Error calculating statistics for ward {ward.ward_number}: {e}")
+                    print(f"Error processing ward {ward.ward_number}: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Assign wards to nearest depots if any exist
+            print(f"\n📍 Checking for depot assignments...")
+            depot_result = assign_wards_to_nearest_depot(config)
+            if depot_result['success']:
+                print(f"   ✅ Assigned {depot_result['assigned_wards']} wards to depots")
+                for assignment in depot_result['assignments']:
+                    print(f"      Ward {assignment['ward']} → {assignment['depot']} ({assignment['distance_km']:.1f} km)")
+            else:
+                print(f"   ⚠️  {depot_result['message']}")
             
             return JsonResponse({
                 'success': True,
-                'config_id': config.id
+                'config_id': config.id,
+                'wards': wards_data,
+                'population_source': 'worldpop' if raster_available else 'manual'
             })
             
         except Exception as e:
@@ -390,8 +631,24 @@ def multiward_routing(request, file_id):
             'area_km2': ward.area_km2,
             'total_nodes': ward.total_nodes,
             'total_roads': ward.total_roads,
-            'total_length_m': ward.total_length_m
+            'total_length_m': ward.total_length_m,
+            'population': ward.population,
+            'population_density_per_km2': ward.population_density_per_km2,
+            'waste_per_capita_kg': ward.waste_per_capita_kg,
+            'vehicle_capacity_kg': ward.vehicle_capacity_kg,
+            'validation_warnings': ward.validation_warnings,
+            'has_valid_data': ward.has_valid_data,
+            'is_connected': ward.is_connected,
+            'assigned_depot': ward.assigned_depot.name if ward.assigned_depot else None,
+            'depot_distance_km': ward.depot_distance_km
         })
+    
+    return render(request, 'osm_app/multiward_routing.html', {
+        'osm_file': osm_record,
+        'config': config,
+        'wards': wards,
+        'wards_json': json.dumps(wards_data)
+    })
     
     return render(request, 'osm_app/multiward_routing.html', {
         'osm_file': osm_record,
@@ -554,47 +811,68 @@ def compute_ward_route(request, file_id):
             
             ward = get_object_or_404(Ward, id=ward_id)
             
-            # Use modular function to compute routes
-            bounds = {
-                'min_lat': ward.min_lat,
-                'max_lat': ward.max_lat,
-                'min_lon': ward.min_lon,
-                'max_lon': ward.max_lon
-            }
+            # Extract ward OSM data using centroid-based assignment (prevents overlap)
+            print(f"\n{'='*80}")
+            print(f"🔄 Computing routes for Ward {ward.ward_number}")
+            print(f"   Using centroid-based road assignment (no overlap)")
+            print(f"{'='*80}\n")
             
-            result = compute_single_ward_routes(
-                osm_file_path=osm_record.processed_file.path,
-                num_vehicles=num_vehicles,
-                bounds=bounds,
-                ward_label=f"Ward {ward.ward_number}"
-            )
+            ward_osm_xml = extract_ward_osm_data(osm_record.processed_file.path, ward)
             
-            if result['success']:
+            # Create temporary file with ward-specific OSM data
+            import tempfile
+            import time
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.osm', delete=False, encoding='utf-8') as tmp_file:
+                tmp_file.write(ward_osm_xml)
+                temp_file_path = tmp_file.name
+            
+            try:
+                # Run routing algorithm on ward-specific data
+                start_time = time.time()
+                
+                print(f"🚗 Initializing route partitioner...")
+                from .routing_utils import OSMRoutePartitioner
+                partitioner = OSMRoutePartitioner(temp_file_path)
+                
+                print(f"🗺️  Computing routes for {num_vehicles} vehicle(s)...")
+                routes_geojson = partitioner.compute_routes(num_vehicles)
+                
+                computation_time = time.time() - start_time
+                
+                # Get statistics
+                stats = partitioner.get_statistics()
+                
+                print(f"✓ Routes computed successfully!")
+                print(f"   Computation time: {computation_time:.2f} seconds")
+                print(f"   Routes generated: {len(routes_geojson.get('features', []))} routes")
+                print(f"{'='*80}\n")
+                
                 # Update ward with results
                 ward.num_vehicles = num_vehicles
-                ward.routes_geojson = result['routes']
-                ward.computation_time = result['computation_time']
+                ward.routes_geojson = routes_geojson
+                ward.computation_time = computation_time
                 ward.computed_at = timezone.now()
                 
                 # Update statistics
-                if result['stats']:
-                    ward.total_nodes = result['stats'].get('total_nodes', 0)
-                    ward.total_roads = result['stats'].get('total_roads', 0)
-                    ward.total_length_m = result['stats'].get('total_length_m', 0)
+                if stats:
+                    ward.total_nodes = stats.get('total_nodes', 0)
+                    ward.total_roads = stats.get('total_roads', 0)
+                    ward.total_length_m = stats.get('total_length_m', 0)
                 
                 ward.save()
                 
                 return JsonResponse({
                     'success': True,
-                    'routes': result['routes'],
-                    'computation_time': result['computation_time']
+                    'routes': routes_geojson,
+                    'computation_time': computation_time
                 })
-            else:
-                return JsonResponse({
-                    'success': False,
-                    'error': result['error']
-                })
-            
+                
+            finally:
+                # Cleanup temporary file
+                import os
+                if os.path.exists(temp_file_path):
+                    os.unlink(temp_file_path)
+                    
         except Exception as e:
             print(f"❌ API Error: {str(e)}")
             import traceback
