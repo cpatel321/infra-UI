@@ -1,0 +1,214 @@
+╔════════════════════════════════════════════════════════════════════╗
+║          🗺️ OSM ROUTE PLANNING SYSTEM - HOME PAGE                 ║
+╚════════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────────┐
+│  🗺️ OSM Route Planning System                                     │
+├────────────────────────────────────────────────────────────────────┤
+│  Choose how you want to start planning waste collection routes    │
+└────────────────────────────────────────────────────────────────────┘
+
+
+        OPTION 1                            OPTION 2
+┌─────────────────────────┐      ┌─────────────────────────┐
+│                         │      │                         │
+│          🏙️            │      │          📤            │
+│                         │      │                         │
+│  Use Default Kanpur Map │      │  Upload Custom OSM File │
+│                         │      │                         │
+│  Start with the         │      │  Upload your own        │
+│  complete Kanpur city   │      │  OpenStreetMap (.osm)   │
+│  map already loaded.    │      │  file for any area you  │
+│  Visually crop to your  │      │  want to analyze.       │
+│  area of interest on    │      │                         │
+│  the next step.         │      │                         │
+│                         │      │                         │
+│ ┌─────────────────────┐ │      │ ┌─────────────────────┐ │
+│ │ 🗺️ Start with      │ │      │ │ 📤 Upload Custom   │ │
+│ │   Kanpur Map        │ │      │ │   File              │ │
+│ └─────────────────────┘ │      │ └─────────────────────┘ │
+│    [Blue Primary]       │      │    [Gray Secondary]     │
+└─────────────────────────┘      └─────────────────────────┘
+         (Hover: lifts up with shadow)
+
+
+[When "Upload Custom File" is clicked, a form appears below:]
+
+┌─────────────────────────────────────────────────────────────┐
+│  Upload OSM File                                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Select .osm file:                                          │
+│  ┌────────────────────────────────────────────┐            │
+│  │ Choose File                         No file chosen │  │
+│  └────────────────────────────────────────────┘            │
+│  Upload an OpenStreetMap (.osm) XML file to process        │
+│                                                             │
+│  [📤 Upload File]  [Cancel]                                │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+
+┌────────────────────────────────────────────────────────────┐
+│  📋 Workflow:                                              │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  1. Choose your map - Default Kanpur or upload custom file│
+│  2. Crop area - Select your region of interest            │
+│  3. Configure wards - Set up multi-ward routing            │
+│  4. Optimize routes - Generate efficient collection paths │
+│                                                            │
+│  Custom OSM files can be downloaded from                  │
+│  OpenStreetMap Export ↗                                   │
+└────────────────────────────────────────────────────────────┘
+
+
+[If there are previously loaded maps:]
+
+┌────────────────────────────────────────────────────────────────┐
+│  📁 Previously Loaded Maps                                     │
+├────────────────────────────────────────────────────────────────┤
+│ ┌──────────────────────────────────────────────────────────┐  │
+│ │ File Name          │ Status     │ Loaded At  │ Actions  │  │
+│ ├──────────────────────────────────────────────────────────┤  │
+│ │ Kanpur_Full_Map    │ Processed  │ 2025-11-19 │ [Crop]   │  │
+│ │ custom_area.osm    │ Processed  │ 2025-11-18 │ [Crop]   │  │
+│ │                    │            │            │ [Route]  │  │
+│ └──────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════
+                        USER INTERACTIONS
+═══════════════════════════════════════════════════════════════════
+
+1️⃣ CLICK "Start with Kanpur Map":
+   ✅ Shows loading confirmation
+   ✅ Processes default map automatically
+   ✅ Redirects to crop page
+   ⏱️ Total time: ~5-10 seconds
+
+2️⃣ CLICK "Upload Custom File":
+   ✅ Expands upload form
+   ✅ User selects file
+   ✅ Uploads and processes
+   ⏱️ Total time: ~10-30 seconds (depends on file size)
+
+3️⃣ CLICK on Previously Loaded Map:
+   ✅ Jump directly to crop or route planning
+   ✅ Resume previous work
+   ⏱️ Instant
+
+
+═══════════════════════════════════════════════════════════════════
+                    TECHNICAL ARCHITECTURE
+═══════════════════════════════════════════════════════════════════
+
+Default Map Flow:
+┌──────────────┐
+│  Click Start │
+│  with Kanpur │
+└──────┬───────┘
+       │
+       ▼
+┌──────────────────────────┐
+│ use_default_map() view   │
+│ - Copy default_map.osm   │
+│ - Create OSMFile record  │
+│ - Process with OSMProc   │
+│ - Extract roads only     │
+│ - Calculate bounds       │
+│ - Save processed file    │
+└──────┬───────────────────┘
+       │
+       ▼
+┌──────────────────┐
+│  Redirect to     │
+│  Crop Page       │
+│  (file_id=X)     │
+└──────────────────┘
+
+
+Custom Upload Flow:
+┌──────────────┐
+│  Click Upload│
+│  Custom File │
+└──────┬───────┘
+       │
+       ▼
+┌────────────────┐
+│  Show Form     │
+└──────┬─────────┘
+       │
+       ▼
+┌────────────────────┐
+│  upload_file() view│
+│  - Validate .osm   │
+│  - Save to media   │
+│  - Create record   │
+└──────┬─────────────┘
+       │
+       ▼
+┌──────────────────┐
+│  Redirect to     │
+│  Process Page    │
+└──────┬───────────┘
+       │
+       ▼
+┌────────────────────┐
+│  User clicks       │
+│  "Process" button  │
+└──────┬─────────────┘
+       │
+       ▼
+┌──────────────────┐
+│  Redirect to     │
+│  Crop Page       │
+└──────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════
+                        COLOR SCHEME
+═══════════════════════════════════════════════════════════════════
+
+🔵 Primary Blue (#6366f1) - Default Kanpur Map option
+⚪ Gray/Secondary - Upload Custom File option
+🟢 Green - Success messages, "Route Planning" button
+🔵 Info Blue - "Crop" button
+🟡 Warning Yellow - Status badges
+❤️ Red - Error messages
+
+Hover Effects:
+- Cards lift 4px up
+- Border changes to primary blue
+- Shadow increases (0 8px 20px rgba(99, 102, 241, 0.15))
+
+
+═══════════════════════════════════════════════════════════════════
+                    RESPONSIVE DESIGN
+═══════════════════════════════════════════════════════════════════
+
+Desktop (>768px):
+┌────────────┐  ┌────────────┐
+│  Option 1  │  │  Option 2  │
+└────────────┘  └────────────┘
+
+Mobile (<768px):
+┌────────────┐
+│  Option 1  │
+└────────────┘
+┌────────────┐
+│  Option 2  │
+└────────────┘
+
+
+═══════════════════════════════════════════════════════════════════
+                        SUCCESS!
+═══════════════════════════════════════════════════════════════════
+
+✅ No more file hunting
+✅ Start planning in seconds
+✅ Beginner-friendly
+✅ Professional appearance
+✅ Maintains all existing functionality
+✅ Backward compatible
